@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>КиноОценка — оценивай любые фильмы</title>
+  <meta name="description" content="Личный дневник оценок фильмов: новинки и классика, поиск, оценки и отзывы.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <a class="logo" href="#/">🎬 Кино<span>Оценка</span></a>
+    <nav class="nav">
+      <a href="#/" data-nav="home" class="active">Главная</a>
+      <a href="#/my" data-nav="my">Мой список</a>
+    </nav>
+    <form id="search-form">
+      <input id="search-input" type="text" placeholder="Найти фильм…" autocomplete="off">
+      <button type="submit">Поиск</button>
+    </form>
+    <span id="mode-badge"></span>
+  </header>
+
+  <main id="content">
+    <p class="loading">Загрузка…</p>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script src="js/tmdb.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
