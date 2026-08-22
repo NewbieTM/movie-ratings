@@ -92,3 +92,15 @@ supabase/schema.sql — SQL-схема таблицы оценок
   оценка + отзыв
 - **Мой список** — все ваши оценки со средней оценкой
 - Ник для подписи оценок запрашивается при первом сохранении
+
+## Безопасность
+
+- **RLS по подписи Telegram**: клиент шлёт `x-tg-init` (подписанные Telegram'ом initData),
+  Postgres проверяет HMAC-SHA256 (pgcrypto) и пускает к строкам только владельца.
+  Миграция: `supabase/migration-security.sql` (там же блок аварийного открата).
+- Веб-режим (вне Telegram): случайный ключ браузера `x-web-key`, колонка `web_key`;
+  доступ только с того же браузера. Старые никовые строки недоступны by design.
+- **CSP** в index.html: сторонние скрипты запрещены (`script-src 'self' + telegram.org`),
+  соединения только к нашим API и Supabase.
+- Порядок миграций: `schema.sql` → `migration.sql` → `migration-watchlist.sql`
+  → `tg-webhook.sql` → `migration-security.sql`.
