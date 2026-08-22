@@ -54,8 +54,6 @@ declare
   hdr   jsonb;
   raw   text;
   pair  text;
-  k     text;
-  v     text;
   dcs   text;
   hash_given text;
   auth_date  bigint;
