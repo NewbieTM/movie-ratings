@@ -344,9 +344,10 @@ const Movies = (() => {
       const d = await KpSource._get("/movie", { "externalId.tmdb": m[1], limit: 1 });
       const x = (d.docs || [])[0];
       const r = x?.rating || {};
-      const v = (r.kp != null || r.imdb != null)
-        ? { ratingKp: r.kp ?? null, ratingImdb: r.imdb ?? null }
-        : null;
+      const v = x ? {
+        ratingKp: r.kp ?? null, ratingImdb: r.imdb ?? null,
+        kpId: x.id ?? null, kpType: x.type ?? null,
+      } : null;
       try { localStorage.setItem(ck, JSON.stringify({ t: Date.now(), v })); } catch {}
       return v;
     } catch { return null; }

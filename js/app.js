@@ -43,6 +43,9 @@ const App = (() => {
 
   let backCb = null;
   let navSeq = 0;                 // защита от гонок навигации
+  let navStack = [];              // история для кнопки «Назад» в Telegram
+  let poppingBack = false;
+  const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
   function backButton(show, cb) {
     const t = TG();
     if (!t || !t.BackButton) return;
@@ -70,32 +73,53 @@ const App = (() => {
     const el = document.createElement("div");
     el.className = "stars interactive";
     for (let i = 1; i <= 10; i++) {
-      const s = document.createElement("span");
-      s.className = "star";
-      s.dataset.i = i;
-      s.innerHTML = `<span class="fill">★</span><i class="zl"></i><i class="zr"></i>`;
-      el.appendChild(s);
+      const st = document.createElement("span");
+      st.className = "star";
+      st.dataset.i = i;
+      st.innerHTML = `<span class="fill">★</span>`;
+      el.appendChild(st);
     }
+    const bubble = document.createElement("div");
+    bubble.className = "rate-bubble";
+    bubble.textContent = String(value || 0);
+    el.appendChild(bubble);
+
     function render() {
-      el.querySelectorAll(".star").forEach((s) => {
-        const i = +s.dataset.i;
+      el.querySelectorAll(".star").forEach((st) => {
+        const i = +st.dataset.i;
         const w = value >= i ? 100 : value === i - 0.5 ? 50 : 0;
-        s.querySelector(".fill").style.width = w + "%";
-        s.classList.toggle("half", w === 50);
+        st.querySelector(".fill").style.width = w + "%";
+        st.classList.toggle("half", w === 50);
       });
-      el.title = `${value || 0} из 10`;
     }
-    el.addEventListener("click", (e) => {
-      const z = e.target.closest(".zl,.zr");
-      if (!z) return;
-      const i = +z.parentElement.dataset.i;
-      value = z.classList.contains("zl") ? i - 0.5 : i;
-      render();
-      haptic();
-      onChange && onChange(value);
+
+    let dragging = false;
+    function posToValue(clientX) {
+      const r = el.getBoundingClientRect();
+      const ratio = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+      return Math.round(Math.max(0.02, ratio) * 20) / 2;   // шаг 0.5
+    }
+    function setVal(v) {
+      v = Math.min(10, Math.max(0.5, v));
+      if (v !== value) { value = v; render(); haptic(); onChange && onChange(value); }
+      bubble.textContent = String(value);
+    }
+    el.addEventListener("pointerdown", (e) => {
+      dragging = true;
+      try { el.setPointerCapture(e.pointerId); } catch {}
+      el.classList.add("dragging");
+      bubble.style.opacity = 1;
+      setVal(posToValue(e.clientX));
+      e.preventDefault();
     });
-    render();
+    el.addEventListener("pointermove", (e) => { if (dragging) setVal(posToValue(e.clientX)); });
+    const end = () => { if (!dragging) return; dragging = false; el.classList.remove("dragging"); bubble.style.opacity = 0; };
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+
+    el.setValue = (v) => { value = Number(v) || 0; render(); };
     el.getValue = () => value;
+    render();
     return el;
   }
 
@@ -131,7 +155,7 @@ const App = (() => {
         </a>
         <div class="card-body">
           <a class="card-title" href="#/movie/${m.key}">${esc(m.title)}</a>
-          <div class="card-meta">${esc(m.year || "—")} ${tagChipsHTML(m.tags)}</div>
+          <div class="card-meta">${m._local ? '<span class="chip you">ваш список</span>' : ""}${esc(m.year || "—")} ${tagChipsHTML(m.tags)}</div>
           ${my ? `<div class="mine"><b>${fmtR(my.rating)}</b>/10 ${starsStatic(Number(my.rating))}</div>` : ""}
         </div>
       </div>`;
@@ -214,13 +238,38 @@ const App = (() => {
     try {
       const d = await Movies.search({ query, page, ...params });
       if (seq !== navSeq) return;
+      // наверх поднимаем совпадения из вашего списка (частичный поиск КП их не всегда находит)
+      const ql = query.toLowerCase();
+      const local = myListRows
+        .filter((r) => r.movie_title.toLowerCase().includes(ql))
+        .slice(0, 6)
+        .map((r) => ({
+          key: r.movie_id, title: r.movie_title,
+          origTitle: "", year: r.movie_year ? Number(r.movie_year) : null,
+          poster: r.movie_poster && r.movie_poster.startsWith("http")
+            ? r.movie_poster
+            : (r.movie_poster ? TMDB_IMG_W342(r.movie_poster) : null),
+          overview: "", tags: r.tag ? [r.tag] : [],
+          ratingKp: null, ratingImdb: null, ratingTmdb: null, votes: 0,
+          _local: true,
+        }));
+      const localKeys = new Set(local.map((m) => m.key));
       resEl.innerHTML =
-        gridHTML(d.items) +
+        gridHTML([...local, ...d.items.filter((m) => !localKeys.has(m.key))]) +
         paginationHTML(d.total, d.page, d.pages, (p) => searchHash(query, params, p));
       window.scrollTo(0, 0);
     } catch (e) {
       resEl.innerHTML = `<p class="error">Поиск недоступен: ${esc(e.message)}</p>`;
     }
+  }
+
+  function kpUrl(m) {
+    const id = m.kpId || (m.source === "kp" ? m.id : null);
+    if (id) {
+      const seg = (m.kpType || m.media) === "movie" ? "film" : "series";
+      return `https://www.kinopoisk.ru/${seg}/${id}/`;
+    }
+    return `https://www.kinopoisk.ru/index.php?kp_query=${encodeURIComponent(m.title || m.origTitle || "")}`;
   }
 
   async function viewMovie(root, key, seq) {
@@ -242,6 +291,7 @@ const App = (() => {
         if (ex) {
           m.ratingKp = m.ratingKp ?? ex.ratingKp;
           m.ratingImdb = m.ratingImdb ?? ex.ratingImdb;
+          if (ex.kpId) { m.kpId = ex.kpId; m.kpType = ex.kpType; }
         }
       } catch { /* необязательное обогащение */ }
     }
@@ -278,8 +328,7 @@ const App = (() => {
               ${my ? `<button id="delete-rating" class="btn danger">Удалить</button>` : ""}
             </div>
           </div>
-          <a class="kp-link" target="_blank" rel="noopener"
-             href="https://www.kinopoisk.ru/index.php?kp_query=${encodeURIComponent(m.origTitle || m.title)}">
+          <a class="kp-link" target="_blank" rel="noopener" href="${kpUrl(m)}">
              Найти на Кинопоиске ↗</a>
         </div>
       </div>`;
@@ -354,12 +403,11 @@ const App = (() => {
     root.innerHTML = `
       <h2>Мой список <span class="count">${rows.length}${rows.length !== myListRows.length ? ` из ${myListRows.length}` : ""} · средняя ${avg}</span></h2>
       <form id="myfilters" class="filters wrap">
-        <input name="q" type="text" placeholder="Фильтр по названию…" value="${esc(params.q || "")}">
         <select name="tag">
           <option value="">Все типы</option>
           ${usedTags.map((t) => `<option value="${esc(t)}" ${tag === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
         </select>
-        <label class="range">от
+        <label class="range">оценка от
           <input name="from" type="number" min="0" max="10" step="0.5" value="${params.from || "0"}"></label>
         <label class="range">до
           <input name="to" type="number" min="0" max="10" step="0.5" value="${params.to || "10"}"></label>
@@ -368,15 +416,20 @@ const App = (() => {
           <option value="rating" ${sort === "rating" ? "selected" : ""}>По оценке</option>
           <option value="title" ${sort === "title" ? "selected" : ""}>По названию</option>
         </select>
-        <button class="btn primary sm" type="submit">Применить</button>
       </form>
       <div id="myresults">${renderMyGrid(rows)}</div>`;
 
-    $("#myfilters").onsubmit = (e) => {
-      e.preventDefault();
-      const p = new URLSearchParams(readFilters(e.target));
-      location.hash = `#/my${p.toString() ? "?" + p.toString() : ""}`;
+    // мгновенное применение фильтров: любое изменение сразу перерисовывает сетку
+    const applyInstant = () => {
+      const p = new URLSearchParams(readFilters($("#myfilters")));
+      const q = ($("#search-input").value || "").trim();
+      if (q) p.set("q", q);
+      location.hash = "#/my" + (p.toString() ? "?" + p.toString() : "");
     };
+    $("#myfilters").querySelectorAll("select").forEach((el) =>
+      el.addEventListener("change", applyInstant));
+    $("#myfilters").querySelectorAll("input").forEach((el) =>
+      el.addEventListener("input", debounce(applyInstant, 300)));
   }
 
   const TMDB_IMG_W342 = (p) =>
@@ -432,6 +485,11 @@ const App = (() => {
     const seq = ++navSeq;
     const root = $("#content");
     const r = parseHash();
+
+    // ведём историю для системной кнопки «Назад» в Telegram
+    const h = location.hash || "#/";
+    if (poppingBack) poppingBack = false;
+    else if (navStack[navStack.length - 1] !== h) navStack.push(h);
     if (backCb) { backButton(false, backCb); backCb = null; }
     hideMainButton();
     setActiveNav(r.name === "home" ? "home" : r.name === "my" ? "my" : "");
@@ -444,10 +502,19 @@ const App = (() => {
       root.innerHTML = `<p class="error">Ошибка: ${esc(e.message)}</p>`;
     }
     if (r.name !== "home") {
-      backCb = () => { location.hash = "#/"; };
+      backCb = () => {
+        if (navStack.length > 1) {
+          navStack.pop();
+          poppingBack = true;
+          location.hash = navStack[navStack.length - 1] || "#/";
+        } else { try { TG()?.close(); } catch {} }
+      };
       backButton(true, backCb);
     }
-    if (r.name === "search") $("#search-input").value = r.query;
+    const si = $("#search-input");
+    if (r.name === "search") { si.value = r.query; si.placeholder = "Фильм или сериал, на любом языке…"; }
+    else if (r.name === "my") { si.value = r.params.q || ""; si.placeholder = "Найти фильм из вашего списка…"; }
+    else { si.value = ""; si.placeholder = "Фильм или сериал, на любом языке…"; }
   }
 
   function setActiveNav(name) {
@@ -467,11 +534,25 @@ const App = (() => {
   function init() {
     initTelegram();
 
-    $("#search-form").onsubmit = (e) => {
+    const myQs = (q) => {
+      const cur = parseHash();
+      const p = new URLSearchParams(cur.params || {});
+      if (q) p.set("q", q); else p.delete("q");
+      p.delete("page");
+      const str = p.toString();
+      return "#/my" + (str ? "?" + str : "");
+    };
+    const submitHeader = (e) => {
       e.preventDefault();
       const q = $("#search-input").value.trim();
-      if (q) location.hash = `#/search/${encodeURIComponent(q)}`;
+      if (parseHash().name === "my") location.hash = myQs(q);
+      else if (q) location.hash = `#/search/${encodeURIComponent(q)}`;
     };
+    $("#search-form").onsubmit = submitHeader;
+    // мгновенный фильтр по названию на странице «Мой список»
+    $("#search-input").addEventListener("input", debounce(() => {
+      if (parseHash().name === "my") location.hash = myQs($("#search-input").value.trim());
+    }, 300));
 
 
     window.addEventListener("hashchange", route);
