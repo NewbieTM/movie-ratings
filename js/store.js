@@ -75,6 +75,12 @@ const Store = (() => {
   // Старые оценки v1 хранили числовой TMDB-id; приводим к формату источника
   const normKey = (k) => (/^\d+$/.test(String(k)) ? `tmdb-${k}` : String(k));
   const normRow = (r) => ({ ...r, movie_id: normKey(r.movie_id) });
+  // Варианты ключа в БД: "tmdb-123" может лежать и как старый "123"
+  function dbKeyVariants(key) {
+    const k = String(key);
+    const m = k.match(/^tmdb-(\d+)$/);
+    return m ? [k, m[1]] : [k];
+  }
 
   /** Мои оценки (по userId либо по нику веб-версии) */
   async function mine() {
@@ -135,10 +141,13 @@ const Store = (() => {
     if (me.userId) row.user_id = me.userId;
 
     if (mode() === "cloud") {
-      const findQ = me.userId
-        ? `ratings?select=id&movie_id=eq.${encodeURIComponent(row.movie_id)}&user_id=eq.${encodeURIComponent(me.userId)}`
-        : `ratings?select=id&movie_id=eq.${encodeURIComponent(row.movie_id)}&user_id=is.null&user_name=eq.${encodeURIComponent(userName)}`;
-      const existing = await sb(findQ);
+      // ищем существующую оценку по всем вариантам id (новый и старый числовой)
+      const variants = dbKeyVariants(row.movie_id)
+        .map((v) => `movie_id.eq.${encodeURIComponent(v)}`).join(",");
+      const owner = me.userId
+        ? `user_id.eq.${encodeURIComponent(me.userId)}`
+        : `and(user_id.is.null,user_name.eq.${encodeURIComponent(userName)})`;
+      const existing = await sb(`ratings?select=id&and=(${owner},or(${variants}))`);
       if (existing && existing.length) {
         await sb(`ratings?id=eq.${existing[0].id}`, "PATCH", row);
       } else {
@@ -156,18 +165,27 @@ const Store = (() => {
     return row;
   }
 
-  /** Удалить мою оценку фильма */
+  /** Удалить мою оценку фильма (с учётом старого числового id в БД) */
   async function remove(movieId) {
     const me = identity();
+    const variants = dbKeyVariants(movieId);
     if (mode() === "cloud") {
-      const q = me.userId
-        ? `ratings?movie_id=eq.${encodeURIComponent(movieId)}&user_id=eq.${encodeURIComponent(me.userId)}`
-        : `ratings?movie_id=eq.${encodeURIComponent(movieId)}&user_id=is.null&user_name=eq.${encodeURIComponent(me.displayName || "аноним")}`;
-      await sb(q, "DELETE");
+      const owner = me.userId
+        ? `user_id.eq.${encodeURIComponent(me.userId)}`
+        : `and(user_id.is.null,user_name.eq.${encodeURIComponent(me.displayName || "аноним")})`;
+      for (const v of variants) {
+        const del = await sb(
+          `ratings?and=(${owner},movie_id.eq.${encodeURIComponent(v)})`,
+          "DELETE",
+          null
+        ).catch(() => null);
+        if (del && del.length) return; // удалили — дальше не ищем
+      }
     } else {
       const dn = me.displayName || "аноним";
       lsWrite(lsRead().filter((r) =>
-        !(r.movie_id === movieId && (me.userId ? r.user_id === me.userId : r.user_name === dn))));
+        !(variants.includes(String(r.movie_id)) &&
+          (me.userId ? r.user_id === me.userId : r.user_name === dn))));
     }
   }
 

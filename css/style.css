@@ -55,12 +55,6 @@ header {
   border-radius: 0 8px 8px 0;
 }
 
-#mode-badge {
-  font-size: 0.75rem; color: var(--text-dim);
-  border: 1px solid #30363d; border-radius: 20px; padding: 4px 10px;
-  cursor: help;
-}
-
 /* ---------- Контент ---------- */
 main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 h2 { margin: 20px 0 14px; font-size: 1.3rem; }
@@ -175,12 +169,18 @@ h2 .count { color: var(--text-dim); font-size: 0.9rem; font-weight: 400; }
 
 /* --- Звёзды с половинками --- */
 .star { position: relative; }
+/* серая база звезды — иначе невыбранные звёзды невидимы на тёмном фоне */
+.stars .star::before {
+  content: "★";
+  color: #29303a;
+}
 .star .fill {
   position: absolute; left: 0; top: 0;
   width: 0%; overflow: hidden; white-space: nowrap;
   color: var(--accent); pointer-events: none;
 }
 .stars.interactive .star { font-size: 1.9rem; cursor: pointer; }
+.stars.interactive .star::before { color: #333c49; }
 .stars.interactive .star .zl, .stars.interactive .star .zr {
   position: absolute; top: -6px; bottom: -6px; width: 50%;
 }

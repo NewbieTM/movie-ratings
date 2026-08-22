@@ -42,6 +42,7 @@ const App = (() => {
   }
 
   let backCb = null;
+  let navSeq = 0;                 // защита от гонок навигации
   function backButton(show, cb) {
     const t = TG();
     if (!t || !t.BackButton) return;
@@ -54,8 +55,13 @@ const App = (() => {
     }
   }
 
+  let lastMainBtnCb = null;
   function hideMainButton() {
-    try { TG()?.MainButton?.hide(); } catch {}
+    try {
+      const mb = TG()?.MainButton;
+      if (mb && lastMainBtnCb) { mb.offClick(lastMainBtnCb); lastMainBtnCb = null; }
+      mb?.hide();
+    } catch {}
   }
 
   // ================= Звёзды с шагом 0.5 =================
@@ -183,9 +189,10 @@ const App = (() => {
   }
 
   // ================= Страницы =================
-  async function viewHome(root) {
+  async function viewHome(root, seq) {
     root.innerHTML = `<p class="loading">Загрузка…</p>`;
     const d = await Movies.home();
+    if (seq !== navSeq) return;
     const srcLabel = Movies.activeName() === "tmdb"
       ? "источник: TMDB (Кинопоиск недоступен)" : "источник: Кинопоиск";
     root.innerHTML = `
@@ -195,7 +202,7 @@ const App = (() => {
       ${d.top.length ? `<h2>Высокие рейтинги</h2>${gridHTML(d.top)}` : ""}`;
   }
 
-  async function viewSearch(root, query, params) {
+  async function viewSearch(root, query, params, seq) {
     const page = Math.max(1, parseInt(params.page || "1", 10) || 1);
     root.innerHTML =
       `<h2>Поиск: «${esc(query)}»</h2>${filterBarHTML(params)}<div id="results"><p class="loading">Ищем…</p></div>`;
@@ -206,6 +213,7 @@ const App = (() => {
     const resEl = $("#results");
     try {
       const d = await Movies.search({ query, page, ...params });
+      if (seq !== navSeq) return;
       resEl.innerHTML =
         gridHTML(d.items) +
         paginationHTML(d.total, d.page, d.pages, (p) => searchHash(query, params, p));
@@ -215,7 +223,7 @@ const App = (() => {
     }
   }
 
-  async function viewMovie(root, key) {
+  async function viewMovie(root, key, seq) {
     root.innerHTML = `<p class="loading">Загружаем…</p>`;
     let m;
     try { m = await Movies.details(key); }
@@ -223,6 +231,7 @@ const App = (() => {
       root.innerHTML = `<p class="error">Не удалось загрузить: ${esc(e.message)}</p>`;
       return;
     }
+    if (seq !== navSeq) return;
     keyCache.set(key, m);
     const my = myRatings.get(key);
 
@@ -283,7 +292,7 @@ const App = (() => {
         haptic("impact");
         toast("Сохранено ✓");
         hideMainButton();
-        viewMovie(root, key);
+        route();
       } catch (e) { toast(e.message, true); }
     }
     async function doDelete() {
@@ -291,7 +300,7 @@ const App = (() => {
         await Store.remove(m.key);
         await refreshMine();
         toast("Оценка удалена");
-        viewMovie(root, key);
+        route();
       } catch (e) { toast(e.message, true); }
     }
 
@@ -301,8 +310,10 @@ const App = (() => {
 
     const t = TG();
     if (t && t.MainButton) {
+      if (lastMainBtnCb) t.MainButton.offClick(lastMainBtnCb);
       t.MainButton.setText("Сохранить оценку");
       t.MainButton.onClick(doSave);
+      lastMainBtnCb = doSave;
       t.MainButton.show();
     }
   }
@@ -405,16 +416,17 @@ const App = (() => {
   }
 
   async function route() {
+    const seq = ++navSeq;
     const root = $("#content");
     const r = parseHash();
     if (backCb) { backButton(false, backCb); backCb = null; }
     hideMainButton();
     setActiveNav(r.name === "home" ? "home" : r.name === "my" ? "my" : "");
     try {
-      if (r.name === "search") await viewSearch(root, r.query, r.params);
-      else if (r.name === "movie") await viewMovie(root, r.key);
-      else if (r.name === "my") await viewMy(root, r.params);
-      else await viewHome(root);
+      if (r.name === "search") await viewSearch(root, r.query, r.params, seq);
+      else if (r.name === "movie") await viewMovie(root, r.key, seq);
+      else if (r.name === "my") await viewMy(root, r.params, seq);
+      else await viewHome(root, seq);
     } catch (e) {
       root.innerHTML = `<p class="error">Ошибка: ${esc(e.message)}</p>`;
     }
@@ -440,7 +452,7 @@ const App = (() => {
 
   // ================= Инициализация =================
   function init() {
-    const isTg = initTelegram();
+    initTelegram();
 
     $("#search-form").onsubmit = (e) => {
       e.preventDefault();
@@ -448,18 +460,6 @@ const App = (() => {
       if (q) location.hash = `#/search/${encodeURIComponent(q)}`;
     };
 
-    const badge = $("#mode-badge");
-    const me = Store.identity();
-    badge.textContent = Store.inTelegram()
-      ? `👤 ${me.displayName}`
-      : Store.mode() === "cloud"
-        ? (me.displayName ? `☁️ ${me.displayName}` : "☁️ облако")
-        : "💾 локально";
-    badge.title = Store.inTelegram()
-      ? "Личность из Telegram, оценки в облаке Supabase"
-      : Store.mode() === "cloud"
-        ? "Оценки в облаке Supabase, синхронизируются между устройствами"
-        : "Оценки только в этом браузере";
 
     window.addEventListener("hashchange", route);
     refreshMine().then(route);
