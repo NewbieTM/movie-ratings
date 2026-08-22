@@ -258,3 +258,10 @@ h2 .count { color: var(--text-dim); font-size: 0.9rem; font-weight: 400; }
 .kp-link:hover { color: var(--accent); }
 
 .chip.you { background: var(--accent-dim); color: #ffe08a; border-color: transparent; }
+
+.relaxed {
+  background: var(--bg-card); border: 1px solid var(--accent-dim);
+  color: var(--text-dim); padding: 10px 14px; border-radius: var(--radius);
+  font-size: 0.88rem; margin-bottom: 14px;
+}
+.relaxed a { color: var(--accent); }

@@ -183,7 +183,6 @@ const App = (() => {
         </select>
         <input name="minRating" type="number" min="0" max="10" step="0.5" placeholder="Рейтинг ≥" value="${esc(p.minRating || "")}">
         <input name="years" type="text" placeholder="Годы: 2020-2024" value="${esc(p.years || "")}">
-        <button class="btn primary sm" type="submit">Применить</button>
       </form>`;
   }
   function readFilters(form) {
@@ -230,14 +229,36 @@ const App = (() => {
     const page = Math.max(1, parseInt(params.page || "1", 10) || 1);
     root.innerHTML =
       `<h2>Поиск: «${esc(query)}»</h2>${filterBarHTML(params)}<div id="results"><p class="loading">Ищем…</p></div>`;
-    $("#filters").onsubmit = (e) => {
-      e.preventDefault();
-      location.hash = searchHash(query, readFilters(e.target));
-    };
+    // мгновенные фильтры: любое изменение сразу перезапрашивает выдачу
+    const applyFilters = () =>
+      { location.hash = searchHash(query, readFilters($("#filters"))); };
+    $("#filters").querySelectorAll("select").forEach((el) =>
+      el.addEventListener("change", applyFilters));
+    $("#filters").querySelectorAll("input").forEach((el) =>
+      el.addEventListener("input", debounce(applyFilters, 450)));
+    $("#filters").addEventListener("submit", (e) => { e.preventDefault(); applyFilters(); });
     const resEl = $("#results");
     try {
-      const d = await Movies.search({ query, page, ...params });
+      let d = await Movies.search({ query, page, ...params });
       if (seq !== navSeq) return;
+
+      // если фильтры съели все совпадения по названию — показываем без них
+      let relaxedNote = "";
+      const hasActiveFilters = !!(params.type || params.minRating || params.years);
+      if (hasActiveFilters && d.items.length === 0) {
+        try {
+          const d2 = await Movies.search({
+            query, page,
+            sort: params.sort,
+          });
+          if (seq !== navSeq) return;
+          if (d2.items.length) {
+            d = d2;
+            relaxedNote = `По заданным фильтрам совпадений не нашлось — показали всё по запросу.`;
+          }
+        } catch {}
+      }
+
       // наверх поднимаем совпадения из вашего списка (частичный поиск КП их не всегда находит)
       const ql = query.toLowerCase();
       const local = myListRows
@@ -255,6 +276,7 @@ const App = (() => {
         }));
       const localKeys = new Set(local.map((m) => m.key));
       resEl.innerHTML =
+        (relaxedNote ? `<p class="relaxed">${relaxedNote} <a href="${searchHash(query, {})}">Сбросить фильтры</a></p>` : "") +
         gridHTML([...local, ...d.items.filter((m) => !localKeys.has(m.key))]) +
         paginationHTML(d.total, d.page, d.pages, (p) => searchHash(query, params, p));
       window.scrollTo(0, 0);
@@ -346,7 +368,7 @@ const App = (() => {
           movie_title: m.title,
           movie_year: m.year,
           movie_poster: m.poster || null,
-          tag: (m.tags || [])[0] || null,
+          tag: pickTag(m.tags),
           rating: val,
           review: $("#review").value,
         });
@@ -515,6 +537,15 @@ const App = (() => {
     if (r.name === "search") { si.value = r.query; si.placeholder = "Фильм или сериал, на любом языке…"; }
     else if (r.name === "my") { si.value = r.params.q || ""; si.placeholder = "Найти фильм из вашего списка…"; }
     else { si.value = ""; si.placeholder = "Фильм или сериал, на любом языке…"; }
+  }
+
+  const TAG_PRIORITY = ["Аниме", "Мультсериал", "Мультфильм", "ТВ-шоу", "Сериал", "Фильм"];
+  const cleanTag = (t) => String(t || "").replace("?", "");
+  // для сохранения выбираем самый конкретный тип, иначе мультики пишутся как «Сериал»
+  function pickTag(tags) {
+    const n = (tags || []).map(cleanTag);
+    for (const pr of TAG_PRIORITY) if (n.includes(pr)) return pr;
+    return n[0] || null;
   }
 
   function setActiveNav(name) {
