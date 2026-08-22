@@ -84,6 +84,4 @@ end;
 $$;
 
 -- anon-ключ должен уметь вызывать функцию (вебхук ходит под ним)
-grant execute on function public.tg_webhook(
-  bigint, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb
-) to anon;
+grant execute on function public.tg_webhook to anon;
