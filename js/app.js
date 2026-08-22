@@ -154,7 +154,7 @@ const App = (() => {
     return `
       <div class="card">
         <a class="poster" href="#/movie/${m.key}">
-          ${m.poster ? `<img loading="lazy" src="${m.poster}" alt="${esc(m.title)}">`
+          ${m.poster ? `<img loading="lazy" decoding="async" src="${m.poster}" alt="${esc(m.title)}">`
                      : `<div class="poster-fallback">🎬</div>`}
           ${badgesHTML(m)}
         </a>
@@ -317,6 +317,7 @@ const App = (() => {
           ${m.director ? `<p class="cast">Режиссёр: ${esc(m.director)}</p>` : ""}
           ${m.cast && m.cast.length ? `<p class="cast">В ролях: ${esc(m.cast.join(", "))}</p>` : ""}
           <p class="overview">${esc(m.overview || "Описание отсутствует.")}</p>
+          <button id="share-btn" class="btn ghost">⤴ Поделиться</button>
           ${!my ? `<button id="want-btn" class="btn ghost ${myWantSet.has(key) ? "active" : ""}">
             ${myWantSet.has(key) ? "✓ В «Хочу посмотреть»" : "＋ Хочу посмотреть"}</button>` : ""}
           <div class="rate-box">
@@ -332,6 +333,22 @@ const App = (() => {
              Найти на Кинопоиске ↗</a>
         </div>
       </div>`;
+
+    const shareBtn = $("#share-btn");
+    if (shareBtn) {
+      shareBtn.onclick = async () => {
+        const url = location.href;
+        try {
+          if (navigator.share) {
+            await navigator.share({ title: "КиноОценка", text: `${m.title} (${m.year || ""})`, url });
+          } else if (navigator.clipboard) {
+            await navigator.clipboard.writeText(url);
+            toast("Ссылка скопирована");
+          }
+          haptic();
+        } catch { /* пользователь отменил */ }
+      };
+    }
 
     const wantBtn = $("#want-btn");
     if (wantBtn) {
@@ -498,7 +515,7 @@ const App = (() => {
     return `<div class="grid">${rows.map((r) => `
         <div class="card want-card">
           <a class="poster" href="#/movie/${encodeURIComponent(r.movie_id)}">
-            ${r.movie_poster ? `<img loading="lazy" src="${TMDB_IMG_W342(r.movie_poster)}" alt="${esc(r.movie_title)}">`
+            ${r.movie_poster ? `<img loading="lazy" decoding="async" src="${TMDB_IMG_W342(r.movie_poster)}" alt="${esc(r.movie_title)}">`
                              : `<div class="poster-fallback">🎬</div>`}
           </a>
           <div class="card-body">
@@ -576,7 +593,7 @@ const App = (() => {
     return `<div class="grid">${rows.map((r) => `
         <div class="card">
           <a class="poster" href="#/movie/${r.movie_id}">
-            ${r.movie_poster ? `<img loading="lazy" src="${TMDB_IMG_W185(r.movie_poster)}" alt="">`
+            ${r.movie_poster ? `<img loading="lazy" decoding="async" src="${TMDB_IMG_W185(r.movie_poster)}" alt="">`
                              : `<div class="poster-fallback">🎬</div>`}
           </a>
           <div class="card-body">
