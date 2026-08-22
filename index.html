@@ -4,9 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>КиноОценка — оценивай любые фильмы</title>
-  <meta name="description" content="Личный дневник оценок фильмов: новинки и классика, поиск, оценки и отзывы.">
+  <meta name="description" content="Личный дневник оценок фильмов и сериалов: новинки и классика, оценки с шагом 0.5, фильтры, рейтинги Кинопоиска и IMDb.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
   <link rel="stylesheet" href="css/style.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
   <header>
@@ -16,7 +17,7 @@
       <a href="#/my" data-nav="my">Мой список</a>
     </nav>
     <form id="search-form">
-      <input id="search-input" type="text" placeholder="Найти фильм…" autocomplete="off">
+      <input id="search-input" type="text" placeholder="Фильм или сериал, на любом языке…" autocomplete="off">
       <button type="submit">Поиск</button>
     </form>
     <span id="mode-badge"></span>
@@ -27,7 +28,7 @@
   </main>
 
   <script src="js/config.js"></script>
-  <script src="js/tmdb.js"></script>
+  <script src="js/api/sources.js"></script>
   <script src="js/store.js"></script>
   <script src="js/app.js"></script>
 </body>

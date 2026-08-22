@@ -1,314 +1,464 @@
 // ============================================================
-//  Главный модуль приложения: роутинг, рендер, звёзды оценок
+//  КиноОценка v2 — SPA + Telegram Mini App
+//  Половинчатые оценки, теги, фильтры, пагинация, КП/IMDb рейтинги,
+//  источники Кинопоиск↔TMDB с фолбеком, вход через Telegram.
 // ============================================================
 const App = (() => {
   const $ = (sel) => document.querySelector(sel);
-  const esc = (s) =>
-    String(s ?? "").replace(/[&<>"']/g, (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
-    );
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const TG = () => window.Telegram && window.Telegram.WebApp;
+  const fmtR = (v) => (v == null ? "—" : Number(v).toFixed(1));
 
-  // Кэш оценок текущего профиля: movie_id -> row
-  let myRatings = new Map();
+  let myRatings = new Map();      // movie_key -> row
+  const keyCache = new Map();     // movie_key -> normalized item
+  let myListRows = [];            // кэш строк для «Моего списка»
 
-  // ---------- Звёздный виджет ----------
-  function starsHTML(rating, movieId, interactive = true) {
-    let html = `<div class="stars" data-movie="${movieId}">`;
-    for (let i = 1; i <= 10; i++) {
-      const on = i <= rating ? "on" : "";
-      html += `<span class="star ${on}" data-value="${i}" ${
-        interactive ? 'role="button" tabindex="0"' : ""
-      }>★</span>`;
+  // ================= Telegram Mini App =================
+  function initTelegram() {
+    const t = TG();
+    if (!t) return false;
+    try {
+      t.ready();
+      t.expand();
+      if (t.setHeaderColor) t.setHeaderColor("#0d1117");
+      if (t.setBackgroundColor) t.setBackgroundColor("#0d1117");
+      if (t.enableClosingConfirmation) t.enableClosingConfirmation();
+    } catch {}
+    if (Store.inTelegram()) {
+      Store.claimLegacy().then((n) => {
+        if (n > 0) toast(`Склеено старых оценок по нику: ${n}`);
+      }).catch(() => {});
     }
-    html += `</div>`;
-    return html;
+    return true;
   }
 
-  // ---------- Карточка фильма ----------
+  function haptic(kind = "selection") {
+    try {
+      const hf = TG()?.HapticFeedback;
+      if (!hf) return;
+      kind === "impact" ? hf.impactOccurred("light") : hf.selectionChanged();
+    } catch {}
+  }
+
+  let backCb = null;
+  function backButton(show, cb) {
+    const t = TG();
+    if (!t || !t.BackButton) return;
+    if (show) {
+      t.BackButton.onClick(cb);
+      t.BackButton.show();
+    } else {
+      try { t.BackButton.offClick(cb); } catch {}
+      t.BackButton.hide();
+    }
+  }
+
+  function hideMainButton() {
+    try { TG()?.MainButton?.hide(); } catch {}
+  }
+
+  // ================= Звёзды с шагом 0.5 =================
+  function starsWidget(initial, onChange) {
+    let value = initial || 0;
+    const el = document.createElement("div");
+    el.className = "stars interactive";
+    for (let i = 1; i <= 10; i++) {
+      const s = document.createElement("span");
+      s.className = "star";
+      s.dataset.i = i;
+      s.innerHTML = `<span class="fill">★</span><i class="zl"></i><i class="zr"></i>`;
+      el.appendChild(s);
+    }
+    function render() {
+      el.querySelectorAll(".star").forEach((s) => {
+        const i = +s.dataset.i;
+        const w = value >= i ? 100 : value === i - 0.5 ? 50 : 0;
+        s.querySelector(".fill").style.width = w + "%";
+        s.classList.toggle("half", w === 50);
+      });
+      el.title = `${value || 0} из 10`;
+    }
+    el.addEventListener("click", (e) => {
+      const z = e.target.closest(".zl,.zr");
+      if (!z) return;
+      const i = +z.parentElement.dataset.i;
+      value = z.classList.contains("zl") ? i - 0.5 : i;
+      render();
+      haptic();
+      onChange && onChange(value);
+    });
+    render();
+    el.getValue = () => value;
+    return el;
+  }
+
+  function starsStatic(value) {
+    let out = `<span class="stars static">`;
+    for (let i = 1; i <= 10; i++) {
+      const w = value >= i ? 100 : value === i - 0.5 ? 50 : 0;
+      out += `<span class="star${w === 50 ? " half" : ""}"><span class="fill" style="width:${w}%">★</span></span>`;
+    }
+    return out + `</span>`;
+  }
+
+  // ================= Карточки =================
+  function badgesHTML(m) {
+    const b = [];
+    m.ratingKp != null && b.push(`<span class="rb kp">КП ${fmtR(m.ratingKp)}</span>`);
+    m.ratingImdb != null && b.push(`<span class="rb imdb">IMDb ${fmtR(m.ratingImdb)}</span>`);
+    m.ratingTmdb != null && b.push(`<span class="rb tmdb">TMDB ${fmtR(m.ratingTmdb)}</span>`);
+    return b.join("");
+  }
+  const tagChipsHTML = (tags) =>
+    (tags || []).map((t) => `<span class="chip">${esc(String(t).replace("?", ""))}</span>`).join("");
+
   function cardHTML(m) {
-    const poster = TMDB.poster(m.poster_path, "w342");
-    const year = (m.release_date || "").slice(0, 4) || "—";
-    const my = myRatings.get(m.id);
-    const rating = my ? my.rating : 0;
+    const my = myRatings.get(m.key);
+    keyCache.set(m.key, m);
     return `
-      <div class="card" data-id="${m.id}">
-        <a class="poster" href="#/movie/${m.id}">
-          ${
-            poster
-              ? `<img loading="lazy" src="${poster}" alt="${esc(m.title)}">`
-              : `<div class="poster-fallback">🎬</div>`
-          }
+      <div class="card">
+        <a class="poster" href="#/movie/${m.key}">
+          ${m.poster ? `<img loading="lazy" src="${m.poster}" alt="${esc(m.title)}">`
+                     : `<div class="poster-fallback">🎬</div>`}
+          ${badgesHTML(m)}
         </a>
         <div class="card-body">
-          <a class="card-title" href="#/movie/${m.id}">${esc(m.title)}</a>
-          <div class="card-year">${year}</div>
-          ${starsHTML(rating, m.id)}
+          <a class="card-title" href="#/movie/${m.key}">${esc(m.title)}</a>
+          <div class="card-meta">${esc(m.year || "—")} ${tagChipsHTML(m.tags)}</div>
+          ${my ? `<div class="mine"><b>${fmtR(my.rating)}</b>/10 ${starsStatic(Number(my.rating))}</div>` : ""}
         </div>
       </div>`;
   }
+  const gridHTML = (items) => items.length
+    ? `<div class="grid">${items.map(cardHTML).join("")}</div>`
+    : `<p class="empty">Ничего не найдено.</p>`;
 
-  function gridHTML(movies) {
-    if (!movies.length)
-      return `<p class="empty">Ничего не найдено. Попробуйте другое название.</p>`;
-    return `<div class="grid">${movies.map(cardHTML).join("")}</div>`;
+  // ================= Фильтры поиска =================
+  const TYPES = [
+    ["", "Все типы"], ["movie", "Фильмы"], ["tv-series", "Сериалы"],
+    ["cartoon", "Мультфильмы"], ["anime", "Аниме"],
+    ["animated-series", "Мультсериалы"], ["tv-show", "ТВ-шоу"],
+  ];
+  const SORTS = [["smart", "Популярные"], ["rating", "По рейтингу"], ["year", "По году"]];
+
+  function filterBarHTML(p) {
+    return `
+      <form id="filters" class="filters">
+        <select name="type">
+          ${TYPES.map(([v, l]) => `<option value="${v}" ${p.type === v ? "selected" : ""}>${l}</option>`).join("")}
+        </select>
+        <select name="sort">
+          ${SORTS.map(([v, l]) => `<option value="${v}" ${(p.sort || "smart") === v ? "selected" : ""}>${l}</option>`).join("")}
+        </select>
+        <input name="minRating" type="number" min="0" max="10" step="0.5" placeholder="Рейтинг ≥" value="${esc(p.minRating || "")}">
+        <input name="years" type="text" placeholder="Годы: 2020-2024" value="${esc(p.years || "")}">
+        <button class="btn primary sm" type="submit">Применить</button>
+      </form>`;
+  }
+  function readFilters(form) {
+    const o = {};
+    for (const [k, v] of new FormData(form).entries())
+      if (String(v).trim()) o[k] = String(v).trim();
+    return o;
+  }
+  function searchHash(query, params, page = 1) {
+    const p = new URLSearchParams(params);
+    if (page > 1) p.set("page", page);
+    const qs = p.toString();
+    return `#/search/${encodeURIComponent(query)}${qs ? "?" + qs : ""}`;
   }
 
-  // ---------- Страницы ----------
-  async function renderHome() {
-    const root = $("#content");
-    if (!TMDB.isConfigured()) {
-      root.innerHTML = `
-        <div class="notice">
-          <h2>🎬 Добро пожаловать в КиноОценку!</h2>
-          <p>Чтобы искать фильмы и видеть постеры, нужен бесплатный ключ TMDB.</p>
-          <p>Откройте файл <code>js/config.js</code> и вставьте ключ —
-          инструкция в <code>README.md</code>. Пока ключа нет, можно добавлять
-          фильмы вручную через «Мой список».</p>
-        </div>`;
-      return;
-    }
-    root.innerHTML = `<p class="loading">Загрузка новинок…</p>`;
+  function paginationHTML(total, page, pages, mkHref) {
+    if (pages <= 1) return total ? `<p class="found">Найдено: ${total}</p>` : "";
+    const nums = [];
+    const from = Math.max(1, page - 2), to = Math.min(pages, page + 2);
+    if (from > 1) nums.push(`<a href="${mkHref(1)}">1</a>`, from > 2 ? `<span class="dots">…</span>` : "");
+    for (let i = from; i <= to; i++)
+      nums.push(`<a class="${i === page ? "cur" : ""}" href="${mkHref(i)}">${i}</a>`);
+    if (to < pages) nums.push(to < pages - 1 ? `<span class="dots">…</span>` : "", `<a href="${mkHref(pages)}">${pages}</a>`);
+    return `<p class="found">Найдено: ${total}</p><nav class="pager">
+      ${page > 1 ? `<a href="${mkHref(page - 1)}">← Назад</a>` : ""}${nums.join("")}
+      ${page < pages ? `<a href="${mkHref(page + 1)}">Вперёд →</a>` : ""}</nav>`;
+  }
+
+  // ================= Страницы =================
+  async function viewHome(root) {
+    root.innerHTML = `<p class="loading">Загрузка…</p>`;
+    const d = await Movies.home();
+    const srcLabel = Movies.activeName() === "tmdb"
+      ? "источник: TMDB (Кинопоиск недоступен)" : "источник: Кинопоиск";
+    root.innerHTML = `
+      <p class="src-note">${srcLabel}</p>
+      ${d.fresh.length ? `<h2>Новинки</h2>${gridHTML(d.fresh)}` : ""}
+      ${d.popular.length ? `<h2>Популярное</h2>${gridHTML(d.popular)}` : ""}
+      ${d.top.length ? `<h2>Высокие рейтинги</h2>${gridHTML(d.top)}` : ""}`;
+  }
+
+  async function viewSearch(root, query, params) {
+    const page = Math.max(1, parseInt(params.page || "1", 10) || 1);
+    root.innerHTML =
+      `<h2>Поиск: «${esc(query)}»</h2>${filterBarHTML(params)}<div id="results"><p class="loading">Ищем…</p></div>`;
+    $("#filters").onsubmit = (e) => {
+      e.preventDefault();
+      location.hash = searchHash(query, readFilters(e.target));
+    };
+    const resEl = $("#results");
     try {
-      const [now, pop] = await Promise.all([TMDB.nowPlaying(), TMDB.popular()]);
-      root.innerHTML = `
-        <h2>Сейчас в кино</h2>
-        ${gridHTML(now.results || [])}
-        <h2>Популярные</h2>
-        ${gridHTML(pop.results || [])}`;
+      const d = await Movies.search({ query, page, ...params });
+      resEl.innerHTML =
+        gridHTML(d.items) +
+        paginationHTML(d.total, d.page, d.pages, (p) => searchHash(query, params, p));
+      window.scrollTo(0, 0);
     } catch (e) {
-      root.innerHTML = `<p class="error">Ошибка загрузки: ${esc(e.message)}</p>`;
+      resEl.innerHTML = `<p class="error">Поиск недоступен: ${esc(e.message)}</p>`;
     }
   }
 
-  async function renderSearch(query) {
-    const root = $("#content");
-    if (!query) {
-      root.innerHTML = `<p class="empty">Введите название фильма в строку поиска.</p>`;
+  async function viewMovie(root, key) {
+    root.innerHTML = `<p class="loading">Загружаем…</p>`;
+    let m;
+    try { m = await Movies.details(key); }
+    catch (e) {
+      root.innerHTML = `<p class="error">Не удалось загрузить: ${esc(e.message)}</p>`;
       return;
     }
-    if (!TMDB.isConfigured()) {
-      root.innerHTML = `<p class="empty">Поиск доступен после настройки ключа TMDB (см. README.md).</p>`;
-      return;
-    }
-    root.innerHTML = `<p class="loading">Ищем «${esc(query)}»…</p>`;
-    try {
-      const data = await TMDB.search(query);
-      root.innerHTML = `<h2>Результаты: «${esc(query)}»</h2>${gridHTML(data.results || [])}`;
-    } catch (e) {
-      root.innerHTML = `<p class="error">Ошибка поиска: ${esc(e.message)}</p>`;
-    }
-  }
+    keyCache.set(key, m);
+    const my = myRatings.get(key);
 
-  async function renderMovie(id) {
-    const root = $("#content");
-    root.innerHTML = `<p class="loading">Загружаем фильм…</p>`;
-    try {
-      const m = await TMDB.details(id);
-      const poster = TMDB.poster(m.poster_path, "w500");
-      const year = (m.release_date || "").slice(0, 4) || "—";
-      const genres = (m.genres || []).map((g) => g.name).join(", ");
-      const director = ((m.credits?.crew || []).find((c) => c.job === "Director") || {}).name || "";
-      const cast = (m.credits?.cast || []).slice(0, 6).map((c) => c.name).join(", ");
-      const my = myRatings.get(m.id);
-      const rating = my ? my.rating : 0;
-      const review = my ? my.review : "";
-
-      root.innerHTML = `
-        <div class="movie-page">
-          <div class="movie-poster">
-            ${poster ? `<img src="${poster}" alt="${esc(m.title)}">` : `<div class="poster-fallback big">🎬</div>`}
+    root.innerHTML = `
+      <div class="movie-page">
+        <div class="movie-poster">
+          ${m.poster ? `<img src="${m.poster}" alt="${esc(m.title)}">`
+                     : `<div class="poster-fallback big">🎬</div>`}
+          <div class="ext-ratings">
+            <div class="ext"><span class="lbl">Кинопоиск</span><b>${fmtR(m.ratingKp)}</b></div>
+            <div class="ext"><span class="lbl">IMDb</span><b>${fmtR(m.ratingImdb)}</b></div>
+            ${m.ratingTmdb != null ? `<div class="ext"><span class="lbl">TMDB</span><b>${fmtR(m.ratingTmdb)}</b></div>` : ""}
           </div>
-          <div class="movie-info">
-            <h1>${esc(m.title)} <span class="year">(${year})</span></h1>
-            ${m.tagline ? `<p class="tagline">${esc(m.tagline)}</p>` : ""}
-            <div class="meta">
-              ${genres ? `<span>🎭 ${esc(genres)}</span>` : ""}
-              ${m.runtime ? `<span>⏱ ${m.runtime} мин</span>` : ""}
-              ${director ? `<span>🎬 Режиссёр: ${esc(director)}</span>` : ""}
-            </div>
-            ${cast ? `<p class="cast">В ролях: ${esc(cast)}</p>` : ""}
-            <p class="overview">${esc(m.overview || "Описание отсутствует.")}</p>
-            <div class="rate-box">
-              <h3>Ваша оценка</h3>
-              ${starsHTML(rating, m.id)}
-              <textarea id="review" placeholder="Отзыв (необязательно)">${esc(review)}</textarea>
-              <div class="rate-actions">
-                <button id="save-rating" class="btn primary">Сохранить</button>
-                ${my ? '<button id="delete-rating" class="btn danger">Удалить оценку</button>' : ""}
-              </div>
+        </div>
+        <div class="movie-info">
+          <h1>${esc(m.title)} <span class="year">(${esc(m.year || "—")})</span></h1>
+          ${m.origTitle && m.origTitle !== m.title ? `<p class="tagline">${esc(m.origTitle)}</p>` : ""}
+          <div class="meta">${tagChipsHTML(m.tags)}
+            ${(m.genres || []).slice(0, 4).map((g) => `<span class="chip dim">${esc(g)}</span>`).join("")}
+            ${m.movieLength ? `<span class="chip dim">⏱ ${m.movieLength} мин</span>` : ""}
+          </div>
+          ${m.director ? `<p class="cast">Режиссёр: ${esc(m.director)}</p>` : ""}
+          ${m.cast && m.cast.length ? `<p class="cast">В ролях: ${esc(m.cast.join(", "))}</p>` : ""}
+          <p class="overview">${esc(m.overview || "Описание отсутствует.")}</p>
+          <div class="rate-box">
+            <h3>${my ? `Ваша оценка: <span class="accent">${fmtR(my.rating)}</span> из 10` : "Поставьте оценку"}</h3>
+            <div id="rate-stars"></div>
+            <textarea id="review" placeholder="Отзыв (необязательно)…">${esc(my?.review || "")}</textarea>
+            <div class="rate-actions">
+              <button id="save-rating" class="btn primary">Сохранить</button>
+              ${my ? `<button id="delete-rating" class="btn danger">Удалить</button>` : ""}
             </div>
           </div>
-        </div>`;
+          <a class="kp-link" target="_blank" rel="noopener"
+             href="https://www.kinopoisk.ru/index.php?kp_query=${encodeURIComponent(m.origTitle || m.title)}">
+             Найти на Кинопоиске ↗</a>
+        </div>
+      </div>`;
 
-      $("#save-rating").onclick = async () => {
-        const starsEl = root.querySelector(".stars");
-        const val = parseInt(starsEl.dataset.current || rating, 10);
-        if (!val) return alert("Сначала выберите оценку (звёзды).");
+    const stars = starsWidget(my?.rating || 0);
+    $("#rate-stars").appendChild(stars);
+
+    async function doSave() {
+      const val = stars.getValue();
+      if (!val) { toast("Сначала выберите оценку", true); return; }
+      try {
+        await ensureIdentity();
         await Store.save({
-          movie_id: m.id,
+          movie_id: m.key,
           movie_title: m.title,
-          movie_year: year,
-          movie_poster: m.poster_path,
+          movie_year: m.year,
+          movie_poster: m.poster || null,
+          tag: (m.tags || [])[0] || null,
           rating: val,
           review: $("#review").value,
         });
-        await refreshMyRatings();
-        alert("Оценка сохранена!");
-        renderMovie(id);
-      };
-      const del = $("#delete-rating");
-      if (del)
-        del.onclick = async () => {
-          await Store.remove(m.id);
-          await refreshMyRatings();
-          renderMovie(id);
-        };
-    } catch (e) {
-      root.innerHTML = `<p class="error">Ошибка: ${esc(e.message)}</p>`;
+        await refreshMine();
+        haptic("impact");
+        toast("Сохранено ✓");
+        hideMainButton();
+        viewMovie(root, key);
+      } catch (e) { toast(e.message, true); }
+    }
+    async function doDelete() {
+      try {
+        await Store.remove(m.key);
+        await refreshMine();
+        toast("Оценка удалена");
+        viewMovie(root, key);
+      } catch (e) { toast(e.message, true); }
+    }
+
+    $("#save-rating").onclick = doSave;
+    const del = $("#delete-rating");
+    if (del) del.onclick = doDelete;
+
+    const t = TG();
+    if (t && t.MainButton) {
+      t.MainButton.setText("Сохранить оценку");
+      t.MainButton.onClick(doSave);
+      t.MainButton.show();
     }
   }
 
-  async function renderMyList() {
-    const root = $("#content");
-    root.innerHTML = `<p class="loading">Загружаем ваш список…</p>`;
-    try {
-      const rows = await Store.list();
-      if (!rows.length) {
-        root.innerHTML = `
-          <h2>Мой список</h2>
-          <p class="empty">Пока пусто. Найдите фильм через поиск и поставьте оценку — он появится здесь.</p>`;
-        return;
-      }
-      const avg = (rows.reduce((s, r) => s + r.rating, 0) / rows.length).toFixed(1);
-      root.innerHTML = `
-        <h2>Мой список <span class="count">(${rows.length}, средняя ${avg})</span></h2>
-        <div class="grid">
-          ${rows
-            .map((r) => `
-              <div class="card" data-id="${r.movie_id}">
-                <a class="poster" href="#/movie/${r.movie_id}">
-                  ${
-                    r.movie_poster
-                      ? `<img loading="lazy" src="${TMDB.poster(r.movie_poster, "w342")}" alt="${esc(r.movie_title)}">`
-                      : `<div class="poster-fallback">🎬</div>`
-                  }
-                </a>
-                <div class="card-body">
-                  <a class="card-title" href="#/movie/${r.movie_id}">${esc(r.movie_title)}</a>
-                  <div class="card-year">${esc(r.movie_year || "—")}</div>
-                  ${starsHTML(r.rating, r.movie_id, false)}
-                  ${r.review ? `<p class="mini-review">${esc(r.review)}</p>` : ""}
-                </div>
-              </div>`)
-            .join("")}
-        </div>`;
-    } catch (e) {
-      root.innerHTML = `<p class="error">Ошибка: ${esc(e.message)}</p>`;
-    }
+  async function viewMy(root, params) {
+    if (!myListRows.length) myListRows = await Store.mine().catch(() => []);
+    const q = (params.q || "").toLowerCase();
+    const from = parseFloat(params.from || "0") || 0;
+    const to = parseFloat(params.to || "10") || 10;
+    const tag = params.tag || "";
+    const sort = params.sort || "date";
+
+    let rows = myListRows.filter((r) =>
+      (!q || r.movie_title.toLowerCase().includes(q)) &&
+      (Number(r.rating) >= from && Number(r.rating) <= to) &&
+      (!tag || r.tag === tag));
+
+    if (sort === "rating") rows.sort((a, b) => b.rating - a.rating);
+    else if (sort === "title") rows.sort((a, b) => a.movie_title.localeCompare(b.movie_title, "ru"));
+    else rows.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+
+    const avg = rows.length ? (rows.reduce((s, r) => s + Number(r.rating), 0) / rows.length).toFixed(1) : "—";
+    const usedTags = [...new Set(myListRows.map((r) => r.tag).filter(Boolean))];
+
+    root.innerHTML = `
+      <h2>Мой список <span class="count">${rows.length}${rows.length !== myListRows.length ? ` из ${myListRows.length}` : ""} · средняя ${avg}</span></h2>
+      <form id="myfilters" class="filters wrap">
+        <input name="q" type="text" placeholder="Фильтр по названию…" value="${esc(params.q || "")}">
+        <select name="tag">
+          <option value="">Все типы</option>
+          ${usedTags.map((t) => `<option value="${esc(t)}" ${tag === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
+        </select>
+        <label class="range">от
+          <input name="from" type="number" min="0" max="10" step="0.5" value="${params.from || "0"}"></label>
+        <label class="range">до
+          <input name="to" type="number" min="0" max="10" step="0.5" value="${params.to || "10"}"></label>
+        <select name="sort">
+          <option value="date" ${sort === "date" ? "selected" : ""}>По дате</option>
+          <option value="rating" ${sort === "rating" ? "selected" : ""}>По оценке</option>
+          <option value="title" ${sort === "title" ? "selected" : ""}>По названию</option>
+        </select>
+        <button class="btn primary sm" type="submit">Применить</button>
+      </form>
+      <div id="myresults">${renderMyGrid(rows)}</div>`;
+
+    $("#myfilters").onsubmit = (e) => {
+      e.preventDefault();
+      const p = new URLSearchParams(readFilters(e.target));
+      location.hash = `#/my${p.toString() ? "?" + p.toString() : ""}`;
+    };
   }
 
-  // ---------- Рейтинг при клике на звёзды в карточках ----------
-  async function refreshMyRatings() {
-    try {
-      const rows = await Store.list();
-      myRatings = new Map(rows.map((r) => [r.movie_id, r]));
-    } catch {
-      myRatings = new Map();
-    }
+  const TMDB_IMG_W342 = (p) =>
+    p.startsWith("http") ? p : `https://image.tmdb.org/t/p/w342${p}`;
+
+  function renderMyGrid(rows) {
+    if (!myListRows.length)
+      return `<p class="empty">Пока пусто. Найдите фильм через поиск и поставьте оценку.</p>`;
+    if (!rows.length)
+      return `<p class="empty">Под фильтры ничего не подошло.</p>`;
+    return `<div class="grid">${rows.map((r) => `
+        <div class="card">
+          <a class="poster" href="#/movie/${r.movie_id}">
+            ${r.movie_poster ? `<img loading="lazy" src="${TMDB_IMG_W342(r.movie_poster)}" alt="">`
+                             : `<div class="poster-fallback">🎬</div>`}
+          </a>
+          <div class="card-body">
+            <a class="card-title" href="#/movie/${r.movie_id}">${esc(r.movie_title)}</a>
+            <div class="card-meta">${esc(r.movie_year || "—")}${r.tag ? ` <span class="chip">${esc(r.tag)}</span>` : ""}</div>
+            <div class="mine"><b>${fmtR(r.rating)}</b>/10 ${starsStatic(Number(r.rating))}</div>
+            ${r.review ? `<p class="mini-review">${esc(r.review)}</p>` : ""}
+          </div>
+        </div>`).join("")}</div>`;
   }
 
-  // ---------- Роутер ----------
+  // ================= Личность на веб-версии =================
+  async function ensureIdentity() {
+    const me = Store.identity();
+    if (me.userId || me.displayName) return me;
+    const name = prompt("Как вас подписывать под оценками?");
+    if (!name) throw new Error("Нужен ник для сохранения оценок");
+    Store.setProfile(name);
+    return Store.identity();
+  }
+
+  // ================= Роутер =================
+  function parseHash() {
+    const h = location.hash || "#/";
+    const [pathPart, qs] = h.slice(1).split("?");
+    const params = Object.fromEntries(new URLSearchParams(qs || ""));
+    const parts = pathPart.split("/").filter(Boolean);
+    if (parts[0] === "search") return { name: "search", query: decodeURIComponent(parts[1] || ""), params };
+    if (parts[0] === "movie") return { name: "movie", key: parts[1], params };
+    if (parts[0] === "my") return { name: "my", params };
+    return { name: "home", params };
+  }
+
   async function route() {
-    const hash = location.hash || "#/";
-    const searchInput = $("#search-input");
-    if (hash.startsWith("#/movie/")) {
-      renderMovie(parseInt(hash.split("/")[2], 10));
-    } else if (hash.startsWith("#/search/")) {
-      const q = decodeURIComponent(hash.slice(9));
-      searchInput.value = q;
-      renderSearch(q);
-    } else if (hash === "#/my") {
-      setActiveNav("my");
-      renderMyList();
-    } else {
-      setActiveNav("home");
-      renderHome();
+    const root = $("#content");
+    const r = parseHash();
+    if (backCb) { backButton(false, backCb); backCb = null; }
+    hideMainButton();
+    setActiveNav(r.name === "home" ? "home" : r.name === "my" ? "my" : "");
+    try {
+      if (r.name === "search") await viewSearch(root, r.query, r.params);
+      else if (r.name === "movie") await viewMovie(root, r.key);
+      else if (r.name === "my") await viewMy(root, r.params);
+      else await viewHome(root);
+    } catch (e) {
+      root.innerHTML = `<p class="error">Ошибка: ${esc(e.message)}</p>`;
     }
+    if (r.name !== "home") {
+      backCb = () => { location.hash = "#/"; };
+      backButton(true, backCb);
+    }
+    if (r.name === "search") $("#search-input").value = r.query;
   }
 
   function setActiveNav(name) {
     document.querySelectorAll(".nav a").forEach((a) =>
-      a.classList.toggle("active", a.dataset.nav === name)
-    );
+      a.classList.toggle("active", a.dataset.nav === name));
   }
 
-  // ---------- Инициализация ----------
+  async function refreshMine() {
+    try {
+      const rows = await Store.mine();
+      myListRows = rows;
+      myRatings = new Map(rows.map((r) => [r.movie_id, r]));
+    } catch { myRatings = new Map(); }
+  }
+
+  // ================= Инициализация =================
   function init() {
-    // Поиск
-    const form = $("#search-form");
-    form.onsubmit = (e) => {
+    const isTg = initTelegram();
+
+    $("#search-form").onsubmit = (e) => {
       e.preventDefault();
       const q = $("#search-input").value.trim();
       if (q) location.hash = `#/search/${encodeURIComponent(q)}`;
     };
 
-    // Клики по звёздам (делегирование)
-    document.addEventListener("click", async (e) => {
-      const star = e.target.closest(".star");
-      if (!star) return;
-      const wrap = star.closest(".stars");
-      const movieId = parseInt(wrap.dataset.movie, 10);
-      const val = parseInt(star.dataset.value, 10);
-      wrap.dataset.current = val;
-      wrap.querySelectorAll(".star").forEach((s) =>
-        s.classList.toggle("on", parseInt(s.dataset.value, 10) <= val)
-      );
-      // Быстрое сохранение прямо из карточки (если профиль задан)
-      if (!wrap.closest(".rate-box")) {
-        const card = wrap.closest(".card");
-        const title = card?.querySelector(".card-title")?.textContent || "";
-        const year = card?.querySelector(".card-year")?.textContent || "";
-        const img = card?.querySelector(".poster img");
-        const posterPath = img
-          ? img.src.split("/t/p/")[1]?.replace(/^w\d+/, "") || null
-          : null;
-        try {
-          await Store.save({
-            movie_id: movieId,
-            movie_title: title,
-            movie_year: year,
-            movie_poster: posterPath,
-            rating: val,
-            review: "",
-          });
-          await refreshMyRatings();
-          toast(`Оценка ${val}/10 сохранена`);
-        } catch (err) {
-          toast("Ошибка сохранения: " + err.message, true);
-        }
-      }
-    });
-
-    // Профиль: просим ник при первом сохранении в облако
-    if (Store.mode() === "cloud" && !Store.getProfile()) {
-      const name = prompt(
-        "Как вас подписывать под оценками? (можно изменить позже в консоли: Store.setProfile('имя'))"
-      );
-      if (name) Store.setProfile(name);
-    }
-
-    // Индикатор режима хранения
     const badge = $("#mode-badge");
-    if (badge) {
-      badge.textContent = Store.mode() === "cloud" ? "☁️ облако" : "💾 локально";
-      badge.title =
-        Store.mode() === "cloud"
-          ? "Оценки хранятся в Supabase"
-          : "Оценки хранятся в этом браузере (настройте Supabase для общего доступа)";
-    }
+    const me = Store.identity();
+    badge.textContent = Store.inTelegram()
+      ? `👤 ${me.displayName}`
+      : Store.mode() === "cloud"
+        ? (me.displayName ? `☁️ ${me.displayName}` : "☁️ облако")
+        : "💾 локально";
+    badge.title = Store.inTelegram()
+      ? "Личность из Telegram, оценки в облаке Supabase"
+      : Store.mode() === "cloud"
+        ? "Оценки в облаке Supabase, синхронизируются между устройствами"
+        : "Оценки только в этом браузере";
 
     window.addEventListener("hashchange", route);
-    refreshMyRatings().then(route);
+    refreshMine().then(route);
   }
 
   function toast(msg, isError = false) {
@@ -316,7 +466,7 @@ const App = (() => {
     t.className = "toast" + (isError ? " error" : "");
     t.textContent = msg;
     document.body.appendChild(t);
-    setTimeout(() => t.remove(), 2500);
+    setTimeout(() => t.remove(), 2600);
   }
 
   return { init };

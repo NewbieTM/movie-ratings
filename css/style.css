@@ -170,3 +170,87 @@ h2 .count { color: var(--text-dim); font-size: 0.9rem; font-weight: 400; }
   main { padding: 14px; }
   .movie-poster { flex-basis: 200px; }
 }
+
+/* ================= v2 ================= */
+
+/* --- Звёзды с половинками --- */
+.star { position: relative; }
+.star .fill {
+  position: absolute; left: 0; top: 0;
+  width: 0%; overflow: hidden; white-space: nowrap;
+  color: var(--accent); pointer-events: none;
+}
+.stars.interactive .star { font-size: 1.9rem; cursor: pointer; }
+.stars.interactive .star .zl, .stars.interactive .star .zr {
+  position: absolute; top: -6px; bottom: -6px; width: 50%;
+}
+.stars.interactive .star .zl { left: 0; }
+.stars.interactive .star .zr { right: 0; }
+.stars.static .star { font-size: 0.85rem; cursor: default; }
+
+/* --- Бейджи рейтингов на постере --- */
+.poster { position: relative; }
+.rb {
+  position: absolute; left: 8px; font-size: 0.72rem; font-weight: 700;
+  padding: 2px 7px; border-radius: 6px; color: #111; z-index: 2;
+}
+.rb.kp   { bottom: 26px; background: #ff5500; color: #fff; }
+.rb.imdb { bottom: 8px;  background: #f5c518; }
+.rb.tmdb { bottom: 44px; background: #90cea1; }
+
+/* --- Чипы типов и метаданные карточки --- */
+.chip {
+  display: inline-block; font-size: 0.7rem; padding: 1px 8px;
+  border: 1px solid var(--accent-dim); border-radius: 20px;
+  color: #d9b64a; margin-right: 4px; white-space: nowrap;
+}
+.chip.dim { border-color: #30363d; color: var(--text-dim); }
+.card-meta { color: var(--text-dim); font-size: 0.78rem; margin: 4px 0 6px; }
+.mine { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; margin-top: 4px; }
+.mine b { color: var(--accent); }
+
+/* --- Панель фильтров --- */
+.filters {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  background: var(--bg-card); border: 1px solid #21262d;
+  padding: 10px 12px; border-radius: var(--radius); margin-bottom: 16px;
+}
+.filters select, .filters input {
+  background: var(--bg); color: var(--text);
+  border: 1px solid #30363d; border-radius: 8px;
+  padding: 7px 10px; font-size: 0.88rem; outline: none;
+}
+.filters input[name="minRating"] { max-width: 110px; }
+.filters input[name="years"] { max-width: 140px; }
+.filters input[name="q"] { flex: 1; min-width: 150px; }
+.filters .range { color: var(--text-dim); font-size: 0.85rem; display: flex; align-items: center; gap: 5px; }
+.filters .range input { max-width: 70px; }
+.btn.sm { padding: 7px 14px; font-size: 0.85rem; }
+
+/* --- Найдено и пагинация --- */
+.found { color: var(--text-dim); font-size: 0.9rem; margin: 14px 0 8px; }
+.pager { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; }
+.pager a {
+  padding: 5px 11px; border-radius: 7px; background: var(--bg-card);
+  border: 1px solid #30363d; font-size: 0.88rem;
+}
+.pager a:hover { border-color: var(--accent); }
+.pager a.cur { background: var(--accent); color: #111; font-weight: 700; border-color: var(--accent); }
+.pager .dots { color: var(--text-dim); padding: 5px 2px; }
+
+/* --- Рейтинги КП / IMDb на странице фильма --- */
+.ext-ratings { display: flex; gap: 8px; margin-top: 12px; }
+.ext {
+  flex: 1; text-align: center; background: var(--bg-card);
+  border: 1px solid #30363d; border-radius: var(--radius); padding: 10px 6px;
+}
+.ext .lbl { display: block; font-size: 0.7rem; color: var(--text-dim); margin-bottom: 3px; }
+.ext b { font-size: 1.15rem; }
+.ext:nth-child(1) b { color: #ff6a2b; }
+.ext:nth-child(2) b { color: var(--accent); }
+.ext:nth-child(3) b { color: #90cea1; }
+
+.src-note { color: var(--text-dim); font-size: 0.75rem; text-align: right; margin-top: 10px; }
+.accent { color: var(--accent); }
+.kp-link { display: inline-block; margin-top: 14px; color: var(--text-dim); font-size: 0.85rem; }
+.kp-link:hover { color: var(--accent); }
