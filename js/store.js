@@ -128,8 +128,11 @@ const Store = (() => {
       const rows = await sb(`ratings?select=*&order=updated_at.desc&limit=1000&and=(${filter})`);
       return (rows || []).map(normRow);
     }
+    const wk = webKey();
     return lsRead()
-      .filter((r) => (me.userId ? r.user_id === me.userId : true))
+      .filter((r) =>
+        (me.userId && r.user_id === me.userId) ||
+        (!r.user_id && r.web_key && r.web_key === wk))
       .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))
       .map(normRow);
   }
@@ -238,8 +241,11 @@ const Store = (() => {
       return (rows || []).map(normRow);
     }
     try {
+      const wk = webKey();
       return JSON.parse(localStorage.getItem(LS_WANT) || "[]")
-        .filter((r) => (me.userId ? r.user_id === me.userId : true))
+        .filter((r) =>
+          (me.userId && r.user_id === me.userId) ||
+          (!r.user_id && r.web_key && r.web_key === wk))
         .map(normRow);
     } catch { return []; }
   }
