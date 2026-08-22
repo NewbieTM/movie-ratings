@@ -677,6 +677,17 @@ const App = (() => {
 
     window.addEventListener("hashchange", route);
     refreshMine().then(route);
+
+    // Тап вне строки поиска — снимаем с неё фокус (клавиатура прячется).
+    // Фаза захвата: работает до прочих обработчиков и не зависит от них.
+    document.addEventListener("pointerdown", (e) => {
+      const si = $("#search-input");
+      const form = $("#search-form");
+      if (!si || !form) return;
+      if (document.activeElement === si && !form.contains(e.target)) {
+        try { si.blur(); } catch {}
+      }
+    }, true);
   }
 
   function toast(msg, isError = false) {
