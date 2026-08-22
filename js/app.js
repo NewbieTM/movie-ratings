@@ -42,7 +42,11 @@ const App = (() => {
   }
 
   let backCb = null;
-  let myLiveApply = null;         // живая фильтрация «Моего списка» без перерисовки страницы
+  let myLiveApply = null;
+  let wantRows = [];              // «Хочу посмотреть»
+  let myWantSet = new Set();
+  const syncWantSet = () =>
+    { myWantSet = new Set(wantRows.map((r) => r.movie_id)); };         // живая фильтрация «Моего списка» без перерисовки страницы
   let navSeq = 0;                 // защита от гонок навигации
   let navStack = [];              // история для кнопки «Назад» в Telegram
   let poppingBack = false;
@@ -63,7 +67,7 @@ const App = (() => {
   function hideMainButton() {
     try {
       const mb = TG()?.MainButton;
-      if (mb && lastMainBtnCb) { mb.offClick(lastMainBtnCb); lastMainBtnCb = null; }
+      if (mb && lastMainBtnCb && typeof mb.offClick === "function") { mb.offClick(lastMainBtnCb); lastMainBtnCb = null; }
       mb?.hide();
     } catch {}
   }
@@ -314,6 +318,8 @@ const App = (() => {
           ${m.director ? `<p class="cast">Режиссёр: ${esc(m.director)}</p>` : ""}
           ${m.cast && m.cast.length ? `<p class="cast">В ролях: ${esc(m.cast.join(", "))}</p>` : ""}
           <p class="overview">${esc(m.overview || "Описание отсутствует.")}</p>
+          ${!my ? `<button id="want-btn" class="btn ghost ${myWantSet.has(key) ? "active" : ""}">
+            ${myWantSet.has(key) ? "✓ В «Хочу посмотреть»" : "＋ Хочу посмотреть"}</button>` : ""}
           <div class="rate-box">
             <h3>${my ? `Ваша оценка: <span class="accent">${fmtR(my.rating)}</span> из 10` : "Поставьте оценку"}</h3>
             <div id="rate-stars"></div>
@@ -327,6 +333,31 @@ const App = (() => {
              Найти на Кинопоиске ↗</a>
         </div>
       </div>`;
+
+    const wantBtn = $("#want-btn");
+    if (wantBtn) {
+      wantBtn.onclick = async () => {
+        const had = myWantSet.has(key);
+        wantBtn.disabled = true;
+        try {
+          if (had) {
+            await Store.wantRemove(key);
+            wantRows = wantRows.filter((r) => r.movie_id !== key);
+          } else {
+            const row = await Store.wantAdd({
+              movieId: key, title: m.title, year: m.year,
+              poster: m.poster, tag: pickTag(m.tags) || null,
+            });
+            wantRows = [row, ...wantRows];
+          }
+          syncWantSet();
+          wantBtn.classList.toggle("active", !had);
+          wantBtn.textContent = !had ? "✓ В «Хочу посмотреть»" : "＋ Хочу посмотреть";
+          haptic();
+        } catch (e) { toast("Не получилось: " + e.message, true); }
+        wantBtn.disabled = false;
+      };
+    }
 
     const stars = starsWidget(my?.rating || 0);
     $("#rate-stars").appendChild(stars);
@@ -367,7 +398,8 @@ const App = (() => {
 
     const t = TG();
     if (t && t.MainButton) {
-      if (lastMainBtnCb) t.MainButton.offClick(lastMainBtnCb);
+      if (lastMainBtnCb && typeof t.MainButton.offClick === "function") t.MainButton.offClick(lastMainBtnCb);
+      lastMainBtnCb = null;
       t.MainButton.setText("Сохранить оценку");
       t.MainButton.onClick(doSave);
       lastMainBtnCb = doSave;
@@ -453,6 +485,48 @@ const App = (() => {
     refresh(false);
   }
 
+  function wantGridHTML() {
+    if (!wantRows.length)
+      return `<p class="empty">Пока пусто. Откройте любой фильм и нажмите «Хочу посмотреть».</p>`;
+    return `<div class="grid want-grid">${wantRows.map((r) => `
+      <div class="card want-card">
+        <a href="#/movie/${encodeURIComponent(r.movie_id)}">
+          ${r.movie_poster
+            ? `<img src="${esc(r.movie_poster)}" loading="lazy" alt="${esc(r.movie_title)}">`
+            : `<div class="poster-fallback">🎬</div>`}
+          <div class="card-title">${esc(r.movie_title)}</div>
+          <div class="card-meta">${esc(r.movie_year || "—")}
+            ${r.tag ? `<span class="chip dim">${esc(r.tag)}</span>` : ""}</div>
+        </a>
+        <button class="want-x" data-x="${esc(r.movie_id)}" title="Убрать из списка">✕</button>
+      </div>`).join("")}</div>`;
+  }
+
+  async function viewWant(root) {
+    try { wantRows = await Store.wantAll(); } catch { wantRows = []; }
+    syncWantSet();
+    root.innerHTML = `
+      <h2>Хочу посмотреть <span class="count" id="want-count">${wantRows.length}</span></h2>
+      <div id="wantgrid">${wantGridHTML()}</div>`;
+
+    $("#wantgrid").addEventListener("click", async (e) => {
+      const x = e.target.closest("[data-x]");
+      if (!x) return;
+      e.preventDefault();
+      const key = x.dataset.x;
+      x.disabled = true;
+      try {
+        await Store.wantRemove(key);
+        wantRows = wantRows.filter((r) => r.movie_id !== key);
+        syncWantSet();
+        $("#wantgrid").innerHTML = wantGridHTML();
+        const c = $("#want-count");
+        if (c) c.textContent = String(wantRows.length);
+        haptic();
+      } catch (err) { toast("Не получилось убрать: " + err.message, true); x.disabled = false; }
+    });
+  }
+
   const TMDB_IMG_W342 = (p) =>
     p.startsWith("http") ? p : `https://image.tmdb.org/t/p/w342${p}`;
 
@@ -499,6 +573,7 @@ const App = (() => {
       return { name: "movie", key, params };
     }
     if (parts[0] === "my") return { name: "my", params };
+    if (parts[0] === "want") return { name: "want", params };
     return { name: "home", params };
   }
 
@@ -515,11 +590,12 @@ const App = (() => {
     else if (navStack[navStack.length - 1] !== h) navStack.push(h);
     if (backCb) { backButton(false, backCb); backCb = null; }
     hideMainButton();
-    setActiveNav(r.name === "home" ? "home" : r.name === "my" ? "my" : "");
+    setActiveNav(["home", "my", "want"].includes(r.name) ? r.name : "");
     try {
       if (r.name === "search") await viewSearch(root, r.query, r.params, seq);
       else if (r.name === "movie") await viewMovie(root, r.key, seq);
       else if (r.name === "my") await viewMy(root, r.params, seq);
+      else if (r.name === "want") await viewWant(root);
       else await viewHome(root, seq);
     } catch (e) {
       root.innerHTML = `<p class="error">Ошибка: ${esc(e.message)}</p>`;

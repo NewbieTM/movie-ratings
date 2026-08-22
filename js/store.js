@@ -10,6 +10,7 @@ const Store = (() => {
   const LS_KEY = "movie-ratings-data";
   const PROFILE_KEY = "movie-ratings-profile";
   const CLAIMED_KEY = "movie-ratings-claimed";
+  const LS_WANT = "movie-ratings-want";
 
   const supabaseConfigured = () => {
     const c = cfg();
@@ -189,6 +190,70 @@ const Store = (() => {
     }
   }
 
+  // ================= Хочу посмотреть (watchlist) =================
+  async function wantAll() {
+    const me = identity();
+    if (mode() === "cloud") {
+      let filter;
+      if (me.userId) filter = `user_id.eq.${me.userId}`;
+      else if (me.displayName)
+        filter = `and(user_id.is.null,user_name.eq.${encodeURIComponent(me.displayName)})`;
+      else return [];
+      const rows = await sb(`watchlist?select=*&order=added_at.desc&limit=1000&and=(${filter})`);
+      return (rows || []).map(normRow);
+    }
+    try {
+      return JSON.parse(localStorage.getItem(LS_WANT) || "[]")
+        .filter((r) => (me.userId ? r.user_id === me.userId : true))
+        .map(normRow);
+    } catch { return []; }
+  }
+
+  async function wantAdd(meta) {
+    const me = identity();
+    const row = {
+      movie_id: String(meta.movieId),
+      movie_title: meta.title,
+      movie_year: meta.year != null ? String(meta.year) : null,
+      movie_poster: meta.poster || null,
+      tag: meta.tag || null,
+      user_id: me.userId || null,
+      user_name: me.userId ? null : (me.displayName || "аноним"),
+    };
+    if (mode() === "cloud") {
+      const r = await sb("watchlist", "POST", row);
+      return normRow(Array.isArray(r) ? r[0] : r);
+    }
+    const rows = JSON.parse(localStorage.getItem(LS_WANT) || "[]");
+    rows.unshift({ ...row, added_at: new Date().toISOString() });
+    localStorage.setItem(LS_WANT, JSON.stringify(rows));
+    return normRow(rows[0]);
+  }
+
+  async function wantRemove(movieId) {
+    const me = identity();
+    const variants = dbKeyVariants(movieId);
+    if (mode() === "cloud") {
+      const owner = me.userId
+        ? `user_id.eq.${encodeURIComponent(me.userId)}`
+        : `and(user_id.is.null,user_name.eq.${encodeURIComponent(me.displayName || "аноним")})`;
+      for (const v of variants) {
+        const del = await sb(
+          `watchlist?and=(${owner},movie_id.eq.${encodeURIComponent(v)})`,
+          "DELETE",
+          null
+        ).catch(() => null);
+        if (del && del.length) return;
+      }
+      return;
+    }
+    const dn = me.displayName || "аноним";
+    localStorage.setItem(LS_WANT, JSON.stringify(
+      JSON.parse(localStorage.getItem(LS_WANT) || "[]").filter((r) =>
+        !(variants.includes(String(r.movie_id)) &&
+          (me.userId ? r.user_id === me.userId : r.user_name === dn)))));
+  }
+
   /** Тихо поправить тег у моей оценки (данные стали точнее) */
   async function retag(movieId, tag) {
     if (!tag) return;
@@ -216,5 +281,6 @@ const Store = (() => {
     }
   }
 
-  return { mode, mine, save, remove, retag, identity, setProfile, claimLegacy, inTelegram };
+  return { mode, mine, save, remove, retag, wantAll, wantAdd, wantRemove,
+           identity, setProfile, claimLegacy, inTelegram };
 })();

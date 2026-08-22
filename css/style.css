@@ -265,3 +265,19 @@ h2 .count { color: var(--text-dim); font-size: 0.9rem; font-weight: 400; }
   font-size: 0.88rem; margin-bottom: 14px;
 }
 .relaxed a { color: var(--accent); }
+
+/* Хочу посмотреть */
+.btn.ghost {
+  background: transparent; color: var(--accent);
+  border: 1px solid var(--accent-dim); width: 100%; margin-bottom: 14px;
+}
+.btn.ghost.active { background: var(--accent-dim); color: #fff; border-color: transparent; }
+.want-card { position: relative; }
+.want-card .card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.want-x {
+  position: absolute; top: 8px; right: 8px; z-index: 2;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: rgba(0,0,0,.65); color: #fff; font-size: .8rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.want-x:active { transform: scale(.9); }
