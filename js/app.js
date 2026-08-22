@@ -485,10 +485,12 @@ const App = (() => {
     refresh(false);
   }
 
-  function wantGridHTML() {
+  function wantGridHTML(rows = wantRows) {
     if (!wantRows.length)
       return `<p class="empty">Пока пусто. Откройте любой фильм и нажмите «Хочу посмотреть».</p>`;
-    return `<div class="grid">${wantRows.map((r) => `
+    if (!rows.length)
+      return `<p class="empty">Под фильтры ничего не подошло.</p>`;
+    return `<div class="grid">${rows.map((r) => `
         <div class="card want-card">
           <a class="poster" href="#/movie/${encodeURIComponent(r.movie_id)}">
             ${r.movie_poster ? `<img loading="lazy" src="${TMDB_IMG_W342(r.movie_poster)}" alt="${esc(r.movie_title)}">`
@@ -502,12 +504,43 @@ const App = (() => {
         </div>`).join("")}</div>`;
   }
 
-  async function viewWant(root) {
+  /** Отфильтрованные строки по выбранному типу */
+  const wantFiltered = () => {
+    const t = ($("#want-tag") || {}).value || "";
+    return t ? wantRows.filter((r) => r.tag === t) : wantRows;
+  };
+
+  async function viewWant(root, params = {}) {
     try { wantRows = await Store.wantAll(); } catch { wantRows = []; }
     syncWantSet();
+    const usedTags = [...new Set(wantRows.map((r) => r.tag).filter(Boolean))];
+
+    function renderWant(syncUrl) {
+      const rows = wantFiltered();
+      $("#want-count").textContent = String(rows.length);
+      $("#wantgrid").innerHTML = wantGridHTML(rows);
+      if (syncUrl) {
+        const p = new URLSearchParams();
+        const t = ($("#want-tag") || {}).value || "";
+        if (t) p.set("tag", t);
+        const qs = p.toString();
+        try { history.replaceState(null, "", "#/want" + (qs ? "?" + qs : "")); } catch {}
+      }
+    }
+
     root.innerHTML = `
       <h2>Хочу посмотреть <span class="count" id="want-count">${wantRows.length}</span></h2>
-      <div id="wantgrid">${wantGridHTML()}</div>`;
+      <div class="filters wrap">
+        <select id="want-tag">
+          <option value="">Все типы</option>
+          ${usedTags.map((t) => `<option ${params.tag === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
+        </select>
+      </div>
+      <div id="wantgrid"></div>`;
+
+    renderWant(false);
+
+    $("#want-tag").addEventListener("change", () => renderWant(true));
 
     $("#wantgrid").addEventListener("click", async (e) => {
       const x = e.target.closest("[data-x]");
@@ -519,9 +552,7 @@ const App = (() => {
         await Store.wantRemove(key);
         wantRows = wantRows.filter((r) => r.movie_id !== key);
         syncWantSet();
-        $("#wantgrid").innerHTML = wantGridHTML();
-        const c = $("#want-count");
-        if (c) c.textContent = String(wantRows.length);
+        renderWant(true);
         haptic();
       } catch (err) { toast("Не получилось убрать: " + err.message, true); x.disabled = false; }
     });
@@ -605,7 +636,7 @@ const App = (() => {
       if (r.name === "search") await viewSearch(root, r.query, r.params, seq);
       else if (r.name === "movie") await viewMovie(root, r.key, seq);
       else if (r.name === "my") await viewMy(root, r.params, seq);
-      else if (r.name === "want") await viewWant(root);
+      else if (r.name === "want") await viewWant(root, r.params);
       else await viewHome(root, seq);
     } catch (e) {
       root.innerHTML = `<p class="error">Ошибка: ${esc(e.message)}</p>`;
