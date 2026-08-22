@@ -488,18 +488,18 @@ const App = (() => {
   function wantGridHTML() {
     if (!wantRows.length)
       return `<p class="empty">Пока пусто. Откройте любой фильм и нажмите «Хочу посмотреть».</p>`;
-    return `<div class="grid want-grid">${wantRows.map((r) => `
-      <div class="card want-card">
-        <a href="#/movie/${encodeURIComponent(r.movie_id)}">
-          ${r.movie_poster
-            ? `<img src="${esc(r.movie_poster)}" loading="lazy" alt="${esc(r.movie_title)}">`
-            : `<div class="poster-fallback">🎬</div>`}
-          <div class="card-title">${esc(r.movie_title)}</div>
-          <div class="card-meta">${esc(r.movie_year || "—")}
-            ${r.tag ? `<span class="chip dim">${esc(r.tag)}</span>` : ""}</div>
-        </a>
-        <button class="want-x" data-x="${esc(r.movie_id)}" title="Убрать из списка">✕</button>
-      </div>`).join("")}</div>`;
+    return `<div class="grid">${wantRows.map((r) => `
+        <div class="card want-card">
+          <a class="poster" href="#/movie/${encodeURIComponent(r.movie_id)}">
+            ${r.movie_poster ? `<img loading="lazy" src="${TMDB_IMG_W342(r.movie_poster)}" alt="${esc(r.movie_title)}">`
+                             : `<div class="poster-fallback">🎬</div>`}
+          </a>
+          <div class="card-body">
+            <a class="card-title" href="#/movie/${encodeURIComponent(r.movie_id)}">${esc(r.movie_title)}</a>
+            <div class="card-meta">${esc(r.movie_year || "—")}${r.tag ? ` <span class="chip">${esc(r.tag)}</span>` : ""}</div>
+          </div>
+          <button class="want-x" data-x="${esc(r.movie_id)}" title="Убрать из списка">✕</button>
+        </div>`).join("")}</div>`;
   }
 
   async function viewWant(root) {
