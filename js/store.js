@@ -11,6 +11,19 @@ const Store = (() => {
   const PROFILE_KEY = "movie-ratings-profile";
   const CLAIMED_KEY = "movie-ratings-claimed";
   const LS_WANT = "movie-ratings-want";
+  const WEBKEY_KEY = "movie-ratings-webkey";
+
+  /** Случайный ключ этого браузера (веб-режим): единственный доступ к своим строкам */
+  function webKey() {
+    let k = null;
+    try { k = localStorage.getItem(WEBKEY_KEY); } catch {}
+    if (!k) {
+      k = (crypto.randomUUID ? crypto.randomUUID()
+                             : "wk-" + Date.now() + "-" + Math.random().toString(36).slice(2));
+      try { localStorage.setItem(WEBKEY_KEY, k); } catch {}
+    }
+    return k;
+  }
 
   const supabaseConfigured = () => {
     const c = cfg();
@@ -77,6 +90,10 @@ const Store = (() => {
         Authorization: `Bearer ${c.SUPABASE_ANON_KEY}`,
         "Content-Type": "application/json",
         Prefer: "return=representation",
+        // RLS: Telegram initData (проверяется подписью на сервере) или веб-ключ
+        ...(inTelegram() && tg() && tg().initData
+              ? { "x-tg-init": tg().initData }
+              : { "x-web-key": webKey() }),
       },
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -156,6 +173,8 @@ const Store = (() => {
       updated_at: new Date().toISOString(),
     };
     if (me.userId) row.user_id = me.userId;
+    // веб-режим: помечаем строку ключом браузера (RLS пускает только с ним)
+    if (!inTelegram()) row.web_key = webKey();
 
     if (mode() === "cloud") {
       // ищем существующую оценку по всем вариантам id (новый и старый числовой)
@@ -235,6 +254,7 @@ const Store = (() => {
       tag: meta.tag || null,
       user_id: me.userId || null,
       user_name: me.userId ? null : (me.displayName || "аноним"),
+      web_key: me.userId && me.userId.startsWith("tg-") ? null : webKey(),
     };
     if (mode() === "cloud") {
       const r = await sb("watchlist", "POST", row);
