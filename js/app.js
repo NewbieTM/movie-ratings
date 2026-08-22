@@ -155,7 +155,7 @@ const App = (() => {
         </a>
         <div class="card-body">
           <a class="card-title" href="#/movie/${m.key}">${esc(m.title)}</a>
-          <div class="card-meta">${m._local ? '<span class="chip you">ваш список</span>' : ""}${esc(m.year || "—")} ${tagChipsHTML(m.tags)}</div>
+          <div class="card-meta">${esc(m.year || "—")} ${tagChipsHTML(m.tags)}</div>
           ${my ? `<div class="mine"><b>${fmtR(my.rating)}</b>/10 ${starsStatic(Number(my.rating))}</div>` : ""}
         </div>
       </div>`;
@@ -181,8 +181,6 @@ const App = (() => {
         <select name="sort">
           ${SORTS.map(([v, l]) => `<option value="${v}" ${(p.sort || "smart") === v ? "selected" : ""}>${l}</option>`).join("")}
         </select>
-        <input name="minRating" type="number" min="0" max="10" step="0.5" placeholder="Рейтинг ≥" value="${esc(p.minRating || "")}">
-        <input name="years" type="text" placeholder="Годы: 2020-2024" value="${esc(p.years || "")}">
       </form>`;
   }
   function readFilters(form) {
@@ -239,45 +237,10 @@ const App = (() => {
     $("#filters").addEventListener("submit", (e) => { e.preventDefault(); applyFilters(); });
     const resEl = $("#results");
     try {
-      let d = await Movies.search({ query, page, ...params });
+      const d = await Movies.search({ query, page, ...params });
       if (seq !== navSeq) return;
-
-      // если фильтры съели все совпадения по названию — показываем без них
-      let relaxedNote = "";
-      const hasActiveFilters = !!(params.type || params.minRating || params.years);
-      if (hasActiveFilters && d.items.length === 0) {
-        try {
-          const d2 = await Movies.search({
-            query, page,
-            sort: params.sort,
-          });
-          if (seq !== navSeq) return;
-          if (d2.items.length) {
-            d = d2;
-            relaxedNote = `По заданным фильтрам совпадений не нашлось — показали всё по запросу.`;
-          }
-        } catch {}
-      }
-
-      // наверх поднимаем совпадения из вашего списка (частичный поиск КП их не всегда находит)
-      const ql = query.toLowerCase();
-      const local = myListRows
-        .filter((r) => r.movie_title.toLowerCase().includes(ql))
-        .slice(0, 6)
-        .map((r) => ({
-          key: r.movie_id, title: r.movie_title,
-          origTitle: "", year: r.movie_year ? Number(r.movie_year) : null,
-          poster: r.movie_poster && r.movie_poster.startsWith("http")
-            ? r.movie_poster
-            : (r.movie_poster ? TMDB_IMG_W342(r.movie_poster) : null),
-          overview: "", tags: r.tag ? [r.tag] : [],
-          ratingKp: null, ratingImdb: null, ratingTmdb: null, votes: 0,
-          _local: true,
-        }));
-      const localKeys = new Set(local.map((m) => m.key));
       resEl.innerHTML =
-        (relaxedNote ? `<p class="relaxed">${relaxedNote} <a href="${searchHash(query, {})}">Сбросить фильтры</a></p>` : "") +
-        gridHTML([...local, ...d.items.filter((m) => !localKeys.has(m.key))]) +
+        gridHTML(d.items) +
         paginationHTML(d.total, d.page, d.pages, (p) => searchHash(query, params, p));
       window.scrollTo(0, 0);
     } catch (e) {

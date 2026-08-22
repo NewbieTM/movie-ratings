@@ -132,19 +132,33 @@ const Movies = (() => {
         d = await this._get("/movie", { ...params, query: undefined });
       }
 
-      let docs = d.docs || [];
-      if (query && (type || minRating || years)) {
-        docs = docs.filter((x) => {
-          if (type && x.type !== type) return false;
-          if (minRating && !(((x.rating || {}).kp || 0) >= Number(minRating))) return false;
-          if (years) {
-            const [a, b] = years.split("-").map(Number);
-            if (!(x.year >= a && x.year <= (b || a))) return false;
-          }
-          return true;
-        });
+      // Фильтр по типу при текстовом поиске: /search фильтры игнорирует,
+      // поэтому собираем пул из нескольких страниц и ПЕРЕСОБИРАЕМ выдачу —
+      // все совпадения оказываются рядом, а не размазаны по чужим страницам.
+      if (query && type) {
+        const POOL = 120;
+        let all = [...(d.docs || [])];
+        let p = d.page || 1;
+        const maxP = Math.min(d.pages || 1, 8);
+        while (all.length < POOL && p < maxP) {
+          p++;
+          try {
+            const nx = await this._get(path, { ...params, page: p });
+            const dd = nx.docs || [];
+            if (!dd.length) break;
+            all.push(...dd);
+          } catch { break; }
+        }
+        const items = all.filter((x) => x.type === type).map((x) => this.mapDoc(x));
+        const start = (page - 1) * limit;
+        return {
+          items: items.slice(start, start + limit),
+          total: items.length, page,
+          pages: Math.max(1, Math.ceil(items.length / limit)),
+        };
       }
-      const kpItems = docs.map((x) => this.mapDoc(x));
+
+      const kpItems = (d.docs || []).map((x) => this.mapDoc(x));
 
       // Дополняем TMDB-совпадениями (латинские запросы у КП бывают неполными)
       if (query && TmdbSource.enabled()) {
@@ -243,8 +257,37 @@ const Movies = (() => {
       });
     },
 
-    async search({ query = "", page = 1, type = "", minRating = "", years = "", sort = "smart" }) {
+    async search({ query = "", page = 1, limit = 20, type = "", minRating = "", years = "", sort = "smart" }) {
       if (!query) return { items: [], total: 0, page: 1, pages: 0 };
+
+      // С типом собираем пул страниц и пересобираем выдачу локально
+      if (type) {
+        let all = [];
+        let p = 1;
+        while (p <= 5) {
+          try {
+            const d2 = await this._get("/search/multi", { query, page: p, include_adult: "false" });
+            all.push(...(d2.results || []));
+            if (p >= Math.min(d2.total_pages || 1, 5)) break;
+          } catch { break; }
+          p++;
+        }
+        let items = this._applyFilters(
+          all.map((x) => this.mapItem(x)).filter((m) => m.media),
+          { type, minRating: "", years: "" }
+        );
+        if (sort === "rating")
+          items.sort((a, b) => (b.ratingTmdb || 0) * Math.log10(b.votes + 10) - (a.ratingTmdb || 0) * Math.log10(a.votes + 10));
+        else if (sort === "year")
+          items.sort((a, b) => (b.year || 0) - (a.year || 0));
+        const start = (page - 1) * limit;
+        return {
+          items: items.slice(start, start + limit),
+          total: items.length, page,
+          pages: Math.max(1, Math.ceil(items.length / limit)),
+        };
+      }
+
       const d = await this._get("/search/multi", { query, page, include_adult: "false" });
       let items = (d.results || []).map((x) => this.mapItem(x)).filter((m) => m.media);
       items = this._applyFilters(items, { type, minRating, years });
