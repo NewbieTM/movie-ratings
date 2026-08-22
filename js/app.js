@@ -196,6 +196,7 @@ const App = (() => {
   }
   function searchHash(query, params, page = 1) {
     const p = new URLSearchParams(params);
+    p.delete("page");              // иначе старая страница «прилипает» к ссылке
     if (page > 1) p.set("page", page);
     const qs = p.toString();
     return `#/search/${encodeURIComponent(query)}${qs ? "?" + qs : ""}`;
