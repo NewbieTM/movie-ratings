@@ -42,6 +42,7 @@ const App = (() => {
   }
 
   let backCb = null;
+  let myLiveApply = null;         // живая фильтрация «Моего списка» без перерисовки страницы
   let navSeq = 0;                 // защита от гонок навигации
   let navStack = [];              // история для кнопки «Назад» в Telegram
   let poppingBack = false;
@@ -376,54 +377,80 @@ const App = (() => {
 
   async function viewMy(root, params) {
     if (!myListRows.length) myListRows = await Store.mine().catch(() => []);
-    const q = (params.q || "").toLowerCase();
-    const from = parseFloat(params.from || "0") || 0;
-    const to = parseFloat(params.to || "10") || 10;
-    const tag = params.tag || "";
-    const sort = params.sort || "date";
 
-    let rows = myListRows.filter((r) =>
-      (!q || r.movie_title.toLowerCase().includes(q)) &&
-      (Number(r.rating) >= from && Number(r.rating) <= to) &&
-      (!tag || r.tag === tag));
-
-    if (sort === "rating") rows.sort((a, b) => b.rating - a.rating);
-    else if (sort === "title") rows.sort((a, b) => a.movie_title.localeCompare(b.movie_title, "ru"));
-    else rows.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
-
-    const avg = rows.length ? (rows.reduce((s, r) => s + Number(r.rating), 0) / rows.length).toFixed(1) : "—";
     const usedTags = [...new Set(myListRows.map((r) => r.tag).filter(Boolean))];
 
     root.innerHTML = `
-      <h2>Мой список <span class="count">${rows.length}${rows.length !== myListRows.length ? ` из ${myListRows.length}` : ""} · средняя ${avg}</span></h2>
+      <h2 id="mysum"></h2>
       <form id="myfilters" class="filters wrap">
         <select name="tag">
           <option value="">Все типы</option>
-          ${usedTags.map((t) => `<option value="${esc(t)}" ${tag === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
+          ${usedTags.map((t) => `<option ${params.tag === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
         </select>
         <label class="range">оценка от
           <input name="from" type="number" min="0" max="10" step="0.5" value="${params.from || "0"}"></label>
         <label class="range">до
           <input name="to" type="number" min="0" max="10" step="0.5" value="${params.to || "10"}"></label>
         <select name="sort">
-          <option value="date" ${sort === "date" ? "selected" : ""}>По дате</option>
-          <option value="rating" ${sort === "rating" ? "selected" : ""}>По оценке</option>
-          <option value="title" ${sort === "title" ? "selected" : ""}>По названию</option>
+          <option value="date">По дате</option>
+          <option value="rating">По оценке</option>
+          <option value="title">По названию</option>
         </select>
       </form>
-      <div id="myresults">${renderMyGrid(rows)}</div>`;
+      <div id="myresults"></div>`;
+    const sortSel = $("#myfilters").querySelector("select[name=sort]");
+    if (params.sort) sortSel.value = params.sort;
+    if (params.q) $("#search-input").value = params.q;
 
-    // мгновенное применение фильтров: любое изменение сразу перерисовывает сетку
-    const applyInstant = () => {
-      const p = new URLSearchParams(readFilters($("#myfilters")));
-      const q = ($("#search-input").value || "").trim();
-      if (q) p.set("q", q);
-      location.hash = "#/my" + (p.toString() ? "?" + p.toString() : "");
-    };
+    // Читаем фильтры прямо из контролов и обновляем ТОЛЬКО сетку и счётчик.
+    // Никакой навигации — фокус в поле остаётся, клавиатура не прячется.
+    function computeRows() {
+      const f = $("#myfilters");
+      const q = ($("#search-input").value || "").trim().toLowerCase();
+      const fromV = parseFloat(f.querySelector("input[name=from]").value) || 0;
+      const toRaw = parseFloat(f.querySelector("input[name=to]").value);
+      const toV = isNaN(toRaw) ? 10 : Math.min(10, Math.max(0, toRaw));
+      const tag = f.querySelector("select[name=tag]").value;
+      const sort = f.querySelector("select[name=sort]").value;
+      const fromV2 = Math.max(0, fromV);
+      const rows = myListRows.filter((r) =>
+        (!q || r.movie_title.toLowerCase().includes(q)) &&
+        (Number(r.rating) >= fromV2 && Number(r.rating) <= toV) &&
+        (!tag || r.tag === tag));
+      if (sort === "rating") rows.sort((a, b) => b.rating - a.rating);
+      else if (sort === "title") rows.sort((a, b) => a.movie_title.localeCompare(b.movie_title, "ru"));
+      else rows.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+      return { rows, q, fromV: fromV2, toV, tag, sort };
+    }
+
+    function refresh(syncUrl) {
+      const { rows, q, fromV, toV, tag, sort } = computeRows();
+      const avg = rows.length
+        ? (rows.reduce((sm, r) => sm + Number(r.rating), 0) / rows.length).toFixed(1) : "—";
+      $("#mysum").innerHTML =
+        `Мой список <span class="count">${rows.length}${rows.length !== myListRows.length ? ` из ${myListRows.length}` : ""} · средняя ${avg}</span>`;
+      $("#myresults").innerHTML = renderMyGrid(rows);
+      if (syncUrl) {
+        const p = new URLSearchParams();
+        if (q) p.set("q", q);
+        if (tag) p.set("tag", tag);
+        if (fromV > 0) p.set("from", String(fromV));
+        if (toV < 10) p.set("to", String(toV));
+        if (sort !== "date") p.set("sort", sort);
+        const qs = p.toString();
+        try { history.replaceState(null, "", "#/my" + (qs ? "?" + qs : "")); } catch {}
+      }
+    }
+
+    const applyLive = debounce(() => refresh(true), 200);
+    myLiveApply = () => refresh(true);
+
     $("#myfilters").querySelectorAll("select").forEach((el) =>
-      el.addEventListener("change", applyInstant));
+      el.addEventListener("change", () => refresh(true)));
     $("#myfilters").querySelectorAll("input").forEach((el) =>
-      el.addEventListener("input", debounce(applyInstant, 300)));
+      el.addEventListener("input", applyLive));
+
+    refresh(false);
   }
 
   const TMDB_IMG_W342 = (p) =>
@@ -479,6 +506,8 @@ const App = (() => {
     const seq = ++navSeq;
     const root = $("#content");
     const r = parseHash();
+
+    myLiveApply = null;
 
     // ведём историю для системной кнопки «Назад» в Telegram
     const h = location.hash || "#/";
@@ -545,17 +574,18 @@ const App = (() => {
       const str = p.toString();
       return "#/my" + (str ? "?" + str : "");
     };
-    const submitHeader = (e) => {
+    $("#search-form").onsubmit = (e) => {
       e.preventDefault();
       const q = $("#search-input").value.trim();
-      if (parseHash().name === "my") location.hash = myQs(q);
-      else if (q) location.hash = `#/search/${encodeURIComponent(q)}`;
+      if (parseHash().name === "my") {
+        if (myLiveApply) myLiveApply();               // живой фильтр списка, без перезагрузки
+        else location.hash = "#/my" + myQs(q);
+      } else if (q) location.hash = `#/search/${encodeURIComponent(q)}`;
     };
-    $("#search-form").onsubmit = submitHeader;
-    // мгновенный фильтр по названию на странице «Мой список»
+    // мгновенный фильтр по названию на странице «Мой список» — тоже без перезагрузки
     $("#search-input").addEventListener("input", debounce(() => {
-      if (parseHash().name === "my") location.hash = myQs($("#search-input").value.trim());
-    }, 300));
+      if (parseHash().name === "my" && myLiveApply) myLiveApply();
+    }, 250));
 
 
     window.addEventListener("hashchange", route);
