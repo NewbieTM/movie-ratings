@@ -30,21 +30,34 @@ on conflict (k) do update set v = excluded.v;
 
 -- ---------- percent-decoding ----------
 create or replace function public.pct_decode(s text)
-returns text language plpgsql immutable as $$
+returns text
+language plpgsql immutable
+as $$
 declare
-  i int := 1; n int := length(s); r text := '';
+  b bytea := ''::bytea;
+  i int := 1;
+  n int := length(s);
+  hx text;
 begin
   while i <= n loop
     if substr(s, i, 1) = '%' and i + 2 <= n then
-      r := r || chr(('x' || substr(s, i + 1, 2))::bit(8)::int);
-      i := i + 3;
+      hx := lower(substr(s, i + 1, 2));
+      if hx ~ '^[0-9a-f]{2}$' then
+        b := b || ('\x' || hx)::bytea;
+        i := i + 3;
+      else
+        b := b || convert_to(substr(s, i, 1), 'UTF8');
+        i := i + 1;
+      end if;
     elsif substr(s, i, 1) = '+' then
-      r := r || ' '; i := i + 1;
+      b := b || ' '::bytea;
+      i := i + 1;
     else
-      r := r || substr(s, i, 1); i := i + 1;
+      b := b || convert_to(substr(s, i, 1), 'UTF8');
+      i := i + 1;
     end if;
   end loop;
-  return r;
+  return convert_from(b, 'UTF8');
 end $$;
 
 -- ---------- проверка initData: возвращает 'tg-<id>' либо NULL ----------
