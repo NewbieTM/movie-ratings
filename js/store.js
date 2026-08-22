@@ -72,6 +72,10 @@ const Store = (() => {
 
   const mode = () => (supabaseConfigured() ? "cloud" : "local");
 
+  // Старые оценки v1 хранили числовой TMDB-id; приводим к формату источника
+  const normKey = (k) => (/^\d+$/.test(String(k)) ? `tmdb-${k}` : String(k));
+  const normRow = (r) => ({ ...r, movie_id: normKey(r.movie_id) });
+
   /** Мои оценки (по userId либо по нику веб-версии) */
   async function mine() {
     const me = identity();
@@ -81,11 +85,13 @@ const Store = (() => {
       else if (me.displayName)
         filter = `and(user_id.is.null,user_name.eq.${encodeURIComponent(me.displayName)})`;
       else return [];
-      return await sb(`ratings?select=*&order=updated_at.desc&limit=1000&and=(${filter})`);
+      const rows = await sb(`ratings?select=*&order=updated_at.desc&limit=1000&and=(${filter})`);
+      return (rows || []).map(normRow);
     }
     return lsRead()
       .filter((r) => (me.userId ? r.user_id === me.userId : true))
-      .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+      .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))
+      .map(normRow);
   }
 
   /**
@@ -116,7 +122,7 @@ const Store = (() => {
     if (!(Number.isFinite(rating) && rating >= 0.5 && rating <= 10))
       throw new Error("Оценка должна быть от 0.5 до 10");
     const row = {
-      movie_id: entry.movie_id,               // строка вида "kp-301"
+      movie_id: normKey(entry.movie_id),      // строка вида "kp-301" / "tmdb-693134"
       movie_title: entry.movie_title,
       movie_year: entry.movie_year != null ? String(entry.movie_year) : null,
       movie_poster: entry.movie_poster ?? null,

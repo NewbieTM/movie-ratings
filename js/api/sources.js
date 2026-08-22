@@ -108,8 +108,9 @@ const Movies = (() => {
       if (sort === "rating") { params.sortField = "ratingKinopoisk"; params.sortType = "-1"; }
       else if (sort === "year") { params.sortField = "year"; params.sortType = "-1"; }
       else if (sort === "smart") { params.sortField = "votesKinopoisk"; params.sortType = "-1"; }
-      const d = await this._get("/movie/search-by-filters-or-query", params)
-        .catch(() => this._get("/movie", params)); // разные версии эндпоинта
+      // Подтверждено зондированием: /v1.4/movie принимает query+фильтры+сортировку
+      // (домен api.kinopoisk.dev 301->api.poiskkino.dev, fetch следует сам)
+      const d = await this._get("/movie", params);
       return {
         items: (d.docs || []).map((x) => this.mapDoc(x)),
         total: d.total || 0, page: d.page || page,

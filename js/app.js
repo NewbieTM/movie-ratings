@@ -395,7 +395,11 @@ const App = (() => {
     const params = Object.fromEntries(new URLSearchParams(qs || ""));
     const parts = pathPart.split("/").filter(Boolean);
     if (parts[0] === "search") return { name: "search", query: decodeURIComponent(parts[1] || ""), params };
-    if (parts[0] === "movie") return { name: "movie", key: parts[1], params };
+    if (parts[0] === "movie") {
+      let key = decodeURIComponent(parts[1] || "");
+      if (/^\d+$/.test(key)) key = `tmdb-${key}`;   // старые ссылки с числовым id
+      return { name: "movie", key, params };
+    }
     if (parts[0] === "my") return { name: "my", params };
     return { name: "home", params };
   }

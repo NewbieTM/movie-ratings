@@ -28,3 +28,8 @@ create index if not exists ratings_movie_id_idx on public.ratings(movie_id);
 -- (старые строки без user_id продолжают жить по правилу movie_id+user_name)
 create unique index if not exists ratings_movie_user_uidx
   on public.ratings(movie_id, user_id) where user_id is not null;
+
+-- 4. Старые числовые id (эпоха только-TMDB) -> формат источника "tmdb-<id>"
+--    Безопасно запускать повторно: преобразованные строки не совпадают с маской
+update public.ratings set movie_id = 'tmdb-' || movie_id
+  where movie_id ~ '^[0-9]+$';
