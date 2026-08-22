@@ -137,18 +137,15 @@ const Movies = (() => {
       // все совпадения оказываются рядом, а не размазаны по чужим страницам.
       if (query && type) {
         const POOL = 120;
-        let all = [...(d.docs || [])];
-        let p = d.page || 1;
+        const all = [...(d.docs || [])];
         const maxP = Math.min(d.pages || 1, 8);
-        while (all.length < POOL && p < maxP) {
-          p++;
-          try {
-            const nx = await this._get(path, { ...params, page: p });
-            const dd = nx.docs || [];
-            if (!dd.length) break;
-            all.push(...dd);
-          } catch { break; }
-        }
+        const wantPages = [];
+        for (let p = 2; p <= maxP && (p - 1) * (limit || 24) < POOL; p++) wantPages.push(p);
+        // все страницы пула одним параллельным залпом (те же запросы, без очереди)
+        const extra = await Promise.all(
+          wantPages.map((pg) => this._get(path, { ...params, page: pg }).catch(() => null))
+        );
+        for (const nx of extra) if (nx && nx.docs) all.push(...nx.docs);
         const items = all.filter((x) => x.type === type).map((x) => this.mapDoc(x));
         const start = (page - 1) * limit;
         return {
@@ -160,8 +157,8 @@ const Movies = (() => {
 
       const kpItems = (d.docs || []).map((x) => this.mapDoc(x));
 
-      // Дополняем TMDB-совпадениями (латинские запросы у КП бывают неполными)
-      if (query && TmdbSource.enabled()) {
+      // Дополняем TMDB только если КП дал мало — не тормозим выдачу лишним запросом
+      if (query && kpItems.length < 12 && TmdbSource.enabled()) {
         try {
           const t = await TmdbSource.search({ query, page: 1 });
           const seen = new Set();

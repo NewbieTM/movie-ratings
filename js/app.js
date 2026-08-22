@@ -265,26 +265,24 @@ const App = (() => {
 
   async function viewMovie(root, key, seq) {
     root.innerHTML = `<p class="loading">Загружаем…</p>`;
-    let m;
-    try { m = await Movies.details(key); }
-    catch (e) {
+    let m, ex = null;
+    try {
+      // детали и обогащение рейтингами летят параллельно — страница открывается быстрее
+      [m, ex] = await Promise.all([
+        Movies.details(key),
+        /^tmdb/.test(key) ? Movies.kpRatings(key).catch(() => null) : Promise.resolve(null),
+      ]);
+    } catch (e) {
       root.innerHTML = `<p class="error">Не удалось загрузить: ${esc(e.message)}</p>`;
       return;
     }
     if (seq !== navSeq) return;
     keyCache.set(key, m);
 
-    // TMDB не даёт рейтинги КП/IMDb — добираем из Кинопоиска по externalId.tmdb
-    if ((m.ratingKp == null || m.ratingImdb == null) && /^tmdb/.test(key)) {
-      try {
-        const ex = await Movies.kpRatings(key);
-        if (seq !== navSeq) return;                       // ушли со страницы
-        if (ex) {
-          m.ratingKp = m.ratingKp ?? ex.ratingKp;
-          m.ratingImdb = m.ratingImdb ?? ex.ratingImdb;
-          if (ex.kpId) { m.kpId = ex.kpId; m.kpType = ex.kpType; }
-        }
-      } catch { /* необязательное обогащение */ }
+    if (ex) {
+      m.ratingKp = m.ratingKp ?? ex.ratingKp;
+      m.ratingImdb = m.ratingImdb ?? ex.ratingImdb;
+      if (ex.kpId) { m.kpId = ex.kpId; m.kpType = ex.kpType; }
     }
 
     const my = myRatings.get(key);
@@ -378,6 +376,12 @@ const App = (() => {
           review: $("#review").value,
         });
         await refreshMine();
+        // оценил — значит посмотрел: тихо убираем из «Хочу посмотреть»
+        if (myWantSet.has(m.key)) {
+          Store.wantRemove(m.key)
+            .then(() => { wantRows = wantRows.filter((r) => r.movie_id !== m.key); syncWantSet(); })
+            .catch(() => {});
+        }
         haptic("impact");
         toast("Сохранено ✓");
         hideMainButton();
@@ -561,6 +565,8 @@ const App = (() => {
 
   const TMDB_IMG_W342 = (p) =>
     p.startsWith("http") ? p : `https://image.tmdb.org/t/p/w342${p}`;
+  const TMDB_IMG_W185 = (p) =>
+    p.startsWith("http") ? p : `https://image.tmdb.org/t/p/w185${p}`;
 
   function renderMyGrid(rows) {
     if (!myListRows.length)
@@ -570,7 +576,7 @@ const App = (() => {
     return `<div class="grid">${rows.map((r) => `
         <div class="card">
           <a class="poster" href="#/movie/${r.movie_id}">
-            ${r.movie_poster ? `<img loading="lazy" src="${TMDB_IMG_W342(r.movie_poster)}" alt="">`
+            ${r.movie_poster ? `<img loading="lazy" src="${TMDB_IMG_W185(r.movie_poster)}" alt="">`
                              : `<div class="poster-fallback">🎬</div>`}
           </a>
           <div class="card-body">
