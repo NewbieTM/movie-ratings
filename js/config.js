@@ -7,7 +7,7 @@ window.APP_CONFIG = {
   TMDB_API_KEY: "4e10b5c86be732c20bd58a2a374e902b",
 
   // Кинопоиск: бесплатный токен с https://kinopoisk.dev (основной источник)
-  KINOPOISK_API_KEY: "ВСТАВЬТЕ_ТОКЕН_KINOPOISK",
+  KINOPOISK_API_KEY: "QNA14Q8-8NX4Y5D-MD2A3X0-J6XMVTD",
 
   // Язык данных TMDB (ru-RU — русские названия и описания)
   TMDB_LANGUAGE: "ru-RU",

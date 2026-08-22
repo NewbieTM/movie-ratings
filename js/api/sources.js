@@ -67,7 +67,8 @@ const Movies = (() => {
     enabled() { const k = cfg().KINOPOISK_API_KEY; return !!k && !k.startsWith("ВСТАВЬТЕ"); },
 
     async _get(path, params = {}) {
-      const u = new URL(`https://api.kinopoisk.dev/v1.4${path}`);
+      // Актуальный хост API (старый api.kinopoisk.dev флапает через редирект)
+      const u = new URL(`https://api.poiskkino.dev/v1.4${path}`);
       for (const [k, v] of Object.entries(params))
         if (v !== undefined && v !== null && v !== "") u.searchParams.set(k, v);
       return cachedGet(u.toString(),
@@ -98,22 +99,70 @@ const Movies = (() => {
       });
     },
 
-    /** Поиск: запрос на любом языке + фильтры + сортировка */
+    /**
+     * Поиск. Проверено зондированием API:
+     *  - текстовый поиск: GET /movie/search?query=&sortField=votes.kp (релевантность×популярность);
+     *    фильтры type/rating на /search игнорируются — применяем их на клиенте
+     *  - просмотр без запроса: GET /movie?type=&rating.kp=&year=&sortField=
+     *  - сортировки: votes.kp | rating.kp | year
+     * Латинский запрос иногда покрывает не все тайтлы — дополняем выдачей TMDB.
+     */
     async search({ query = "", page = 1, limit = 24, type = "", minRating = "", years = "", sort = "smart" }) {
-      const params = { page, limit, notNullFields: "name" };
+      const sortMap = { smart: "votes.kp", rating: "rating.kp", year: "year" };
+      const params = { page, limit };
       if (query) params.query = query;
-      if (type) params.type = type;
-      if (minRating) params.ratingKinopoisk = `${minRating}-10`;
-      if (years) params.year = years.replace(/[\s]/g, "");
-      if (sort === "rating") { params.sortField = "ratingKinopoisk"; params.sortType = "-1"; }
-      else if (sort === "year") { params.sortField = "year"; params.sortType = "-1"; }
-      else if (sort === "smart") { params.sortField = "votesKinopoisk"; params.sortType = "-1"; }
-      // Подтверждено зондированием: /v1.4/movie принимает query+фильтры+сортировку
-      // (домен api.kinopoisk.dev 301->api.poiskkino.dev, fetch следует сам)
-      const d = await this._get("/movie", params);
+      if (query) {
+        params.sortField = sortMap[sort] || sortMap.smart;
+        params.sortType = "-1";
+      } else {
+        if (type) params.type = type;
+        if (minRating) params["rating.kp"] = `${minRating}-10`;
+        if (years) params.year = years.replace(/\s/g, "");
+        params.sortField = sortMap[sort] || sortMap.smart;
+        params.sortType = "-1";
+        params.notNullFields = "name";
+      }
+      const path = query ? "/movie/search" : "/movie";
+      let d;
+      try {
+        d = await this._get(path, params);
+      } catch (e) {
+        // при сбое поиска пробуем широкий эндпоинт (он хотя бы отдаст базу по сортировке)
+        if (!query) throw e;
+        d = await this._get("/movie", { ...params, query: undefined });
+      }
+
+      let docs = d.docs || [];
+      if (query && (type || minRating || years)) {
+        docs = docs.filter((x) => {
+          if (type && x.type !== type) return false;
+          if (minRating && !(((x.rating || {}).kp || 0) >= Number(minRating))) return false;
+          if (years) {
+            const [a, b] = years.split("-").map(Number);
+            if (!(x.year >= a && x.year <= (b || a))) return false;
+          }
+          return true;
+        });
+      }
+      const kpItems = docs.map((x) => this.mapDoc(x));
+
+      // Дополняем TMDB-совпадениями (латинские запросы у КП бывают неполными)
+      if (query && TmdbSource.enabled()) {
+        try {
+          const t = await TmdbSource.search({ query, page: 1 });
+          const seen = new Set();
+          for (const m of kpItems)
+            [m.title, m.origTitle].forEach((s) => s && seen.add(`${s.toLowerCase()}|${m.year}`));
+          const extras = t.items.filter((m) =>
+            ![m.title, m.origTitle].some((s) => s && seen.has(`${s.toLowerCase()}|${m.year}`)));
+          kpItems.push(...extras);
+          kpItems.sort((a, b) => (b.votes || 0) - (a.votes || 0));
+        } catch { /* TMDB не обязателен */ }
+      }
+
       return {
-        items: (d.docs || []).map((x) => this.mapDoc(x)),
-        total: d.total || 0, page: d.page || page,
+        items: kpItems,
+        total: d.total || kpItems.length, page: d.page || page,
         pages: Math.min(d.pages || 1, 500),
       };
     },
@@ -267,5 +316,7 @@ const Movies = (() => {
     activeName,
     TAG_LABELS,
     tagLabel: (raw) => TAG_LABELS[raw] || raw,
+    // для тестов
+    __debug: { KpSource, TmdbSource },
   };
 })();
