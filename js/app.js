@@ -43,6 +43,10 @@ const App = (() => {
 
   let backCb = null;
   let myLiveApply = null;
+  const VIEW_KEY = "mr-view-mode";
+  const getViewMode = () => { try { return localStorage.getItem(VIEW_KEY) === "compact" ? "compact" : "cards"; } catch { return "cards"; } };
+  const setViewMode = (v) => { try { localStorage.setItem(VIEW_KEY, v); } catch {} };
+
   let wantRows = [];              // «Хочу посмотреть»
   let myWantSet = new Set();
   const syncWantSet = () =>
@@ -450,8 +454,10 @@ const App = (() => {
           <option value="rating">По оценке</option>
           <option value="title">По названию</option>
         </select>
+        <button type="button" id="view-toggle" class="view-toggle">${getViewMode() === "cards" ? "☰ Компактно" : "▦ Карточки"}</button>
       </form>
       <div id="myresults"></div>`;
+    bindViewToggle(() => refresh(false));
     const sortSel = $("#myfilters").querySelector("select[name=sort]");
     if (params.sort) sortSel.value = params.sort;
     if (params.q) $("#search-input").value = params.q;
@@ -512,6 +518,16 @@ const App = (() => {
       return `<p class="empty">Пока пусто. Откройте любой фильм и нажмите «Хочу посмотреть».</p>`;
     if (!rows.length)
       return `<p class="empty">Под фильтры ничего не подошло.</p>`;
+    if (getViewMode() === "compact") {
+      return minilistHTML(rows, (r) => miniRowHTML({
+        href: `#/movie/${encodeURIComponent(r.movie_id)}`,
+        poster: r.movie_poster,
+        title: esc(r.movie_title),
+        sub: `${esc(r.movie_year || "—")}${r.tag ? ` · ${esc(r.tag)}` : ""}`,
+        right: "",
+        extra: `<button class="want-x" data-x="${esc(r.movie_id)}" title="Убрать из списка">✕</button>`,
+      }));
+    }
     return `<div class="grid">${rows.map((r) => `
         <div class="card want-card">
           <a class="poster" href="#/movie/${encodeURIComponent(r.movie_id)}">
@@ -526,6 +542,20 @@ const App = (() => {
         </div>`).join("")}</div>`;
   }
 
+  /** Кнопка переключения вида карточки/компактно (перерисовывает текущий список) */
+  function bindViewToggle(rerender) {
+    const b = $("#view-toggle");
+    if (!b) return;
+    b.onclick = () => {
+      setViewMode(getViewMode() === "cards" ? "compact" : "cards");
+      b.textContent = getViewMode() === "cards" ? "☰ Компактно" : "▦ Карточки";
+      haptic();
+      rerender();
+    };
+  }
+
+  let wantLiveApply = null;       // живой поиск по «Хочу посмотреть»
+
   /** Отфильтрованные строки по выбранному типу */
   const wantFiltered = () => {
     const t = ($("#want-tag") || {}).value || "";
@@ -538,17 +568,21 @@ const App = (() => {
     const usedTags = [...new Set(wantRows.map((r) => r.tag).filter(Boolean))];
 
     function renderWant(syncUrl) {
-      const rows = wantFiltered();
+      const t = ($("#want-tag") || {}).value || "";
+      const qq = ($("#search-input").value || "").trim().toLowerCase();
+      const rows = wantRows.filter((r) =>
+        (!t || r.tag === t) && (!qq || r.movie_title.toLowerCase().includes(qq)));
       $("#want-count").textContent = String(rows.length);
       $("#wantgrid").innerHTML = wantGridHTML(rows);
       if (syncUrl) {
         const p = new URLSearchParams();
-        const t = ($("#want-tag") || {}).value || "";
         if (t) p.set("tag", t);
+        if (qq) p.set("q", qq);
         const qs = p.toString();
         try { history.replaceState(null, "", "#/want" + (qs ? "?" + qs : "")); } catch {}
       }
     }
+    wantLiveApply = () => renderWant(true);
 
     root.innerHTML = `
       <h2>Хочу посмотреть <span class="count" id="want-count">${wantRows.length}</span></h2>
@@ -557,12 +591,15 @@ const App = (() => {
           <option value="">Все типы</option>
           ${usedTags.map((t) => `<option ${params.tag === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
         </select>
+        <button type="button" id="view-toggle" class="view-toggle">${getViewMode() === "cards" ? "☰ Компактно" : "▦ Карточки"}</button>
       </div>
       <div id="wantgrid"></div>`;
 
+    if (params.q) $("#search-input").value = params.q;
     renderWant(false);
 
     $("#want-tag").addEventListener("change", () => renderWant(true));
+    bindViewToggle(() => renderWant(false));
 
     $("#wantgrid").addEventListener("click", async (e) => {
       const x = e.target.closest("[data-x]");
@@ -590,6 +627,15 @@ const App = (() => {
       return `<p class="empty">Пока пусто. Найдите фильм через поиск и поставьте оценку.</p>`;
     if (!rows.length)
       return `<p class="empty">Под фильтры ничего не подошло.</p>`;
+    if (getViewMode() === "compact") {
+      return minilistHTML(rows, (r) => miniRowHTML({
+        href: `#/movie/${encodeURIComponent(r.movie_id)}`,
+        poster: r.movie_poster,
+        title: esc(r.movie_title),
+        sub: `${esc(r.movie_year || "—")}${r.tag ? ` · ${esc(r.tag)}` : ""}`,
+        right: `<b>${fmtR(r.rating)}</b>/10`,
+      }));
+    }
     return `<div class="grid">${rows.map((r) => `
         <div class="card">
           <a class="poster" href="#/movie/${r.movie_id}">
@@ -603,6 +649,23 @@ const App = (() => {
             ${r.review ? `<p class="mini-review">${esc(r.review)}</p>` : ""}
           </div>
         </div>`).join("")}</div>`;
+  }
+
+  /** Компактный список: горизонтальные мини-строки */
+  function miniRowHTML({ href, poster, title, sub, right, extra = "" }) {
+    return `
+      <a class="mini-row" href="${href}">
+        ${poster ? `<img loading="lazy" decoding="async" src="${TMDB_IMG_W185(poster)}" alt="">`
+                 : `<span class="mi-fallback">🎬</span>`}
+        <span class="mi-body">
+          <span class="mi-title">${title}</span>
+          <span class="mi-sub">${sub}</span>
+        </span>
+        <span class="mi-right">${right}</span>${extra}
+      </a>`;
+  }
+  function minilistHTML(rows, mkRow) {
+    return `<div class="minilist">${rows.map(mkRow).join("")}</div>`;
   }
 
   // ================= Личность на веб-версии =================
@@ -648,6 +711,7 @@ const App = (() => {
     const r = parseHash();
 
     myLiveApply = null;
+    wantLiveApply = null;
 
     // ведём историю для системной кнопки «Назад» в Telegram
     const h = location.hash || "#/";
@@ -678,6 +742,7 @@ const App = (() => {
     const si = $("#search-input");
     if (r.name === "search") { si.value = r.query; si.placeholder = "Фильм или сериал, на любом языке…"; }
     else if (r.name === "my") { si.value = r.params.q || ""; si.placeholder = "Найти фильм из вашего списка…"; }
+    else if (r.name === "want") { si.value = r.params.q || ""; si.placeholder = "Найти из «Хочу посмотреть»…"; }
     else { si.value = ""; si.placeholder = "Фильм или сериал, на любом языке…"; }
   }
 
@@ -720,13 +785,18 @@ const App = (() => {
       if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
       const q = $("#search-input").value.trim();
       if (parseHash().name === "my") {
-        if (myLiveApply) myLiveApply();               // живой фильтр списка, без перезагрузки
+        if (myLiveApply) myLiveApply();
         else location.hash = "#/my" + myQs(q);
+      } else if (parseHash().name === "want") {
+        if (wantLiveApply) wantLiveApply();           // живой поиск по watchlist
+        else location.hash = `#/want?q=${encodeURIComponent(q)}`;
       } else if (q) location.hash = `#/search/${encodeURIComponent(q)}`;
     };
     // мгновенный фильтр по названию на странице «Мой список» — тоже без перезагрузки
     $("#search-input").addEventListener("input", debounce(() => {
-      if (parseHash().name === "my" && myLiveApply) myLiveApply();
+      const n = parseHash().name;
+      if (n === "my" && myLiveApply) myLiveApply();
+      if (n === "want" && wantLiveApply) wantLiveApply();
     }, 250));
 
 

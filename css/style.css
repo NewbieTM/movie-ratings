@@ -286,3 +286,27 @@ h2 .count { color: var(--text-dim); font-size: 0.9rem; font-weight: 400; }
 @media (max-width: 720px) {
   input, select, textarea { font-size: 1rem !important; }
 }
+
+/* Компактный вид списков */
+.minilist { display: flex; flex-direction: column; gap: 8px; }
+.mini-row {
+  display: flex; gap: 10px; align-items: center;
+  background: var(--bg-card); border: 1px solid #262c36;
+  border-radius: 10px; padding: 6px 10px;
+  color: var(--text); text-decoration: none; position: relative;
+}
+.mini-row img, .mi-fallback {
+  width: 42px; height: 60px; object-fit: cover; border-radius: 6px;
+  flex: none; background: #1b2027;
+}
+.mi-fallback { display: flex; align-items: center; justify-content: center; font-size: 1.2rem; }
+.mi-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mi-title { font-weight: 600; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mi-sub { font-size: .78rem; color: var(--text-dim); }
+.mi-right { font-size: .8rem; color: var(--accent); font-weight: 700; white-space: nowrap; }
+.view-toggle {
+  background: transparent; border: 1px solid #30363d; color: var(--text-dim);
+  border-radius: 8px; padding: 6px 12px; font-size: .8rem; cursor: pointer;
+}
+.view-toggle:hover { color: var(--accent); border-color: var(--accent-dim); }
+.mini-row .want-x { top: 4px; right: 4px; width: 22px; height: 22px; font-size: .7rem; }
