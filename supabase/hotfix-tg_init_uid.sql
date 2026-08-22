@@ -1,8 +1,9 @@
 -- ============================================================
---  ХОТФИКС: убрана плpgsql-переменная pair, конфликтовавшая с
---  алиасом колонки (ошибка 42702 ambiguous column).
+--  ХОТФИКС v2: pgcrypto вызывается со схемой extensions
+--  (ранее hmac() не находилась -> 42883 / HTTP 404 на подписанных запросах).
 --  Выполнить этот один блок в SQL Editor — политики трогать не нужно.
 -- ============================================================
+create extension if not exists pgcrypto with schema extensions;
 create or replace function public.tg_init_uid()
 returns text
 language plpgsql stable security definer
@@ -65,8 +66,8 @@ begin
     return null;
   end if;
 
-  secret := hmac(convert_to(tok, 'UTF8'), convert_to('WebAppData', 'UTF8'), 'sha256');
-  if encode(hmac(convert_to(dcs, 'UTF8'), secret, 'sha256'), 'hex') <> lower(hash_given) then
+  secret := extensions.hmac(convert_to(tok, 'UTF8'), convert_to('WebAppData', 'UTF8'), 'sha256');
+  if encode(extensions.hmac(convert_to(dcs, 'UTF8'), secret, 'sha256'), 'hex') <> lower(hash_given) then
     return null;                                   -- подпись не сошлась
   end if;
 

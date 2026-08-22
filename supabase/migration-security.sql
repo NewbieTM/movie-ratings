@@ -12,6 +12,9 @@
 --   • Старые строки с никами (user_name, без web_key) становятся недоступны
 -- ============================================================
 
+-- ---------- pgcrypto для hmac (в Supabase живёт в схеме extensions) ----------
+create extension if not exists pgcrypto with schema extensions;
+
 -- ---------- секреты ----------
 create schema if not exists private;
 
@@ -107,8 +110,8 @@ begin
     return null;
   end if;
 
-  secret := hmac(convert_to(tok, 'UTF8'), convert_to('WebAppData', 'UTF8'), 'sha256');
-  if encode(hmac(convert_to(dcs, 'UTF8'), secret, 'sha256'), 'hex') <> lower(hash_given) then
+  secret := extensions.hmac(convert_to(tok, 'UTF8'), convert_to('WebAppData', 'UTF8'), 'sha256');
+  if encode(extensions.hmac(convert_to(dcs, 'UTF8'), secret, 'sha256'), 'hex') <> lower(hash_given) then
     return null;                                   -- подпись не сошлась
   end if;
 
