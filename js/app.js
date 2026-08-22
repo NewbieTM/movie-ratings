@@ -553,10 +553,20 @@ const App = (() => {
   // ================= Личность на веб-версии =================
   async function ensureIdentity() {
     const me = Store.identity();
-    if (me.userId || me.displayName) return me;
-    const name = prompt("Как вас подписывать под оценками?");
-    if (!name) throw new Error("Нужен ник для сохранения оценок");
-    Store.setProfile(name);
+    if (me.userId) return me;
+    let t = null;
+    let tries = 0;
+    while (!t) {
+      if (++tries > 5) throw new Error("Не удалось распознать Id");
+      const raw = prompt(
+        "Чтобы сохранять оценки и списки, укажите ваш Telegram Id или @username.\n\n" +
+        "Численный Id — лучший вариант (не меняется никогда): напишите что угодно боту @userinfobot, он пришлет ваш Id.\n\n" +
+        "Либо введите @username (учтите: если смените его в Telegram, доступ по нему пропадет).",
+        "");
+      if (!raw) throw new Error("Нужен Telegram Id или @username");
+      t = Store.setProfile(raw);
+      if (!t) alert("Не похоже на Id (только цифры) или @username. Попробуйте еще раз.");
+    }
     return Store.identity();
   }
 

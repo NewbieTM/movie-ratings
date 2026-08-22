@@ -28,8 +28,22 @@ const Store = (() => {
       const nm = [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username || "Без имени";
       return { userId: `tg-${u.id}`, displayName: nm };
     }
+    // веб-версия: вход по Telegram Id (тот же аккаунт!) или @username
     const p = legacyProfile();
-    return { userId: null, displayName: p ? p.name : null };
+    if (!p || !p.kind) return { userId: null, displayName: null };
+    return {
+      userId: p.kind === "tg" ? `tg-${p.value}` : `tgu-${p.value}`,
+      displayName: p.kind === "tg" ? `TG ${p.value}` : `@${p.value}`,
+    };
+  }
+
+  /** "123456789" -> tg-аккаунт; "@name"/"name" -> username-аккаунт; иначе null */
+  function parseTid(input) {
+    const v = String(input || "").trim();
+    if (/^\d{2,15}$/.test(v)) return { kind: "tg", value: v };
+    const m = v.match(/^@?([A-Za-z][A-Za-z0-9_]{3,31})$/);
+    if (m) return { kind: "tgu", value: m[1].toLowerCase() };
+    return null;
   }
 
   // ---------- Локальный профиль (веб-версия) ----------
@@ -37,11 +51,13 @@ const Store = (() => {
     try { return JSON.parse(localStorage.getItem(PROFILE_KEY)) || null; }
     catch { return null; }
   }
-  function setProfile(name) {
+  function setProfile(raw) {
+    const t = parseTid(raw);
+    if (!t) return null;
     localStorage.setItem(PROFILE_KEY, JSON.stringify({
-      name: String(name).trim().slice(0, 40),
-      created_at: new Date().toISOString(),
+      ...t, created_at: new Date().toISOString(),
     }));
+    return t;
   }
 
   // ================= localStorage backend =================
