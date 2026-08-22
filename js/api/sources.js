@@ -281,32 +281,75 @@ const Movies = (() => {
   };
 
   // ================= Оркестратор с фолбеком =================
+  // Порядок приоритета: TMDB основной, Кинопоиск — фолбек.
+  // Если основной упал, успешный источник «залипает» на 15 минут,
+  // чтобы не тормозить каждый запрос; потом пробуем основной снова.
   const sources = () =>
-    [KpSource, TmdbSource].filter((s) => s.enabled());
+    [TmdbSource, KpSource].filter((s) => s.enabled());
 
   let activeSource = null;
+  let activeAt = 0;
+  const STICKY_MS = 15 * 60e3;
+  const disabledUntil = {};          // источники временно в отключке (лимиты)
   const activeName = () => activeSource ? activeSource.name : null;
 
-  async function call(method, ...args) {
-    const list = sources();
-    if (!list.length) throw new Error("Не настроен ни один источник данных (см. README)");
-    // предпочитаем последний удачно работавший источник
-    if (activeSource) {
+  function orderedSources() {
+    const list = sources().filter((s) => (disabledUntil[s.name] || 0) < Date.now());
+    if (activeSource && Date.now() - activeAt < STICKY_MS &&
+        !disabledUntil[activeSource?.name]) {
       const i = list.indexOf(activeSource);
       if (i > 0) list.unshift(list.splice(i, 1)[0]);
     }
+    return list.length ? list : sources();   // всё отключено — всё равно пробуем
+  }
+
+  async function call(method, ...args) {
+    const list = orderedSources();
+    if (!list.length) throw new Error("Не настроен ни один источник данных (см. README)");
     let lastErr = null;
     for (const s of list) {
       try {
         const res = await s[method](...args);
         activeSource = s;
+        activeAt = Date.now();
         return res;
-      } catch (e) { lastErr = e; }
+      } catch (e) {
+        lastErr = e;
+        // исчерпан суточный лимит источника — выключаем его до конца дня
+        if (/403|суточн|лимит|Forbid/i.test(String(e.message)))
+          disabledUntil[s.name] = Date.now() + 12 * 36e5;
+      }
     }
     throw new Error(
-      `Источники данных недоступны (${lastErr ? lastErr.message : "ошибка сети"}). ` +
+      `Источники данных недоступны (${lastErr ? lastErr.message.slice(0, 120) : "ошибка сети"}). ` +
       `Показаны данные из кэша, если есть.`
     );
+  }
+
+  /**
+   * Рейтинги Кинопоиска и IMDb для тайтла из TMDB:
+   * точное сопоставление по externalId.tmdb, кэш на 7 дней
+   * (пустой результат тоже кэшируется — на 12 часов).
+   * Вызывается при заходе на страницу фильма.
+   */
+  async function kpRatings(key) {
+    const m = String(key).match(/^tmdb(?:-tv)?-(\d+)$/);
+    if (!m || !KpSource.enabled()) return null;
+    const ck = "mr-kpmap:" + key;
+    try {
+      const c = JSON.parse(localStorage.getItem(ck));
+      if (c && Date.now() - c.t < (c.v ? 7 * 864e5 : 12 * 36e5)) return c.v;
+    } catch {}
+    try {
+      const d = await KpSource._get("/movie", { "externalId.tmdb": m[1], limit: 1 });
+      const x = (d.docs || [])[0];
+      const r = x?.rating || {};
+      const v = (r.kp != null || r.imdb != null)
+        ? { ratingKp: r.kp ?? null, ratingImdb: r.imdb ?? null }
+        : null;
+      try { localStorage.setItem(ck, JSON.stringify({ t: Date.now(), v })); } catch {}
+      return v;
+    } catch { return null; }
   }
 
   return {
@@ -316,6 +359,7 @@ const Movies = (() => {
     activeName,
     TAG_LABELS,
     tagLabel: (raw) => TAG_LABELS[raw] || raw,
+    kpRatings,
     // для тестов
     __debug: { KpSource, TmdbSource },
   };

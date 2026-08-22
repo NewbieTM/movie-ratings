@@ -194,7 +194,7 @@ const App = (() => {
     const d = await Movies.home();
     if (seq !== navSeq) return;
     const srcLabel = Movies.activeName() === "tmdb"
-      ? "источник: TMDB (Кинопоиск недоступен)" : "источник: Кинопоиск";
+      ? "источник: TMDB" : "источник: Кинопоиск (фолбек)";
     root.innerHTML = `
       <p class="src-note">${srcLabel}</p>
       ${d.fresh.length ? `<h2>Новинки</h2>${gridHTML(d.fresh)}` : ""}
@@ -233,6 +233,19 @@ const App = (() => {
     }
     if (seq !== navSeq) return;
     keyCache.set(key, m);
+
+    // TMDB не даёт рейтинги КП/IMDb — добираем из Кинопоиска по externalId.tmdb
+    if ((m.ratingKp == null || m.ratingImdb == null) && /^tmdb/.test(key)) {
+      try {
+        const ex = await Movies.kpRatings(key);
+        if (seq !== navSeq) return;                       // ушли со страницы
+        if (ex) {
+          m.ratingKp = m.ratingKp ?? ex.ratingKp;
+          m.ratingImdb = m.ratingImdb ?? ex.ratingImdb;
+        }
+      } catch { /* необязательное обогащение */ }
+    }
+
     const my = myRatings.get(key);
 
     root.innerHTML = `
