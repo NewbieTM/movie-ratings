@@ -189,5 +189,32 @@ const Store = (() => {
     }
   }
 
-  return { mode, mine, save, remove, identity, setProfile, claimLegacy, inTelegram };
+  /** Тихо поправить тег у моей оценки (данные стали точнее) */
+  async function retag(movieId, tag) {
+    if (!tag) return;
+    const me = identity();
+    const variants = dbKeyVariants(movieId);
+    if (mode() === "cloud") {
+      const owner = me.userId
+        ? `user_id.eq.${encodeURIComponent(me.userId)}`
+        : `and(user_id.is.null,user_name.eq.${encodeURIComponent(me.displayName || "аноним")})`;
+      for (const v of variants) {
+        const upd = await sb(
+          `ratings?and=(${owner},movie_id.eq.${encodeURIComponent(v)})`,
+          "PATCH",
+          { tag }
+        ).catch(() => null);
+        if (upd && upd.length) return;
+      }
+    } else {
+      const dn = me.displayName || "аноним";
+      const rows = lsRead();
+      for (const r of rows)
+        if (variants.includes(String(r.movie_id)) &&
+            (me.userId ? r.user_id === me.userId : r.user_name === dn)) { r.tag = tag; }
+      lsWrite(rows);
+    }
+  }
+
+  return { mode, mine, save, remove, retag, identity, setProfile, claimLegacy, inTelegram };
 })();

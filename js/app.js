@@ -320,6 +320,15 @@ const App = (() => {
 
     const my = myRatings.get(key);
 
+    // самолечение: если тип фильма теперь определяется точнее — обновляем метку
+    if (my) {
+      const betterTag = pickTag(m.tags);
+      if (betterTag && my.tag !== betterTag) {
+        my.tag = betterTag;
+        Store.retag(key, betterTag).catch(() => {});
+      }
+    }
+
     root.innerHTML = `
       <div class="movie-page">
         <div class="movie-poster">
