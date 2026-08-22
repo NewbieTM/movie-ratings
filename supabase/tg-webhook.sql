@@ -50,9 +50,8 @@ begin
     'inline_keyboard', json_build_array(
       json_build_array(
         json_build_object(
-          'text', '🎬 Открыть КиноОценку',
-          'web_app', json_build_object(
-            'url', 'https://newbietm.github.io/movie-ratings/')
+          'text', '🎬 Открыть на весь экран',
+          'url', 'https://t.me/kinorates_bot/kino'
         )
       )
     )
@@ -77,7 +76,7 @@ begin
     return json_build_object(
       'method', 'sendMessage',
       'chat_id', cid,
-      'text', 'Я бот-помощник КиноОценки 🙂 Весь функционал — в приложении, открой его кнопкой ниже.',
+      'text', 'Я бот-помощник КиноОценки 🙂 Открой приложение по прямой ссылке — на весь экран: t.me/kinorates_bot/kino',
       'reply_markup', kb
     );
   end if;

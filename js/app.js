@@ -662,6 +662,7 @@ const App = (() => {
     };
     $("#search-form").onsubmit = (e) => {
       e.preventDefault();
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
       const q = $("#search-input").value.trim();
       if (parseHash().name === "my") {
         if (myLiveApply) myLiveApply();               // живой фильтр списка, без перезагрузки

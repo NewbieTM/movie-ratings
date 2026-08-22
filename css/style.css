@@ -281,3 +281,8 @@ h2 .count { color: var(--text-dim); font-size: 0.9rem; font-weight: 400; }
   display: flex; align-items: center; justify-content: center;
 }
 .want-x:active { transform: scale(.9); }
+
+/* iOS: поля меньше 16px вызывают авто-зум при фокусе — держим 16px на мобильных */
+@media (max-width: 720px) {
+  input, select, textarea { font-size: 1rem !important; }
+}
