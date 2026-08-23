@@ -97,7 +97,8 @@ supabase/schema.sql — SQL-схема таблицы оценок
 
 - **RLS по подписи Telegram**: клиент шлёт `x-tg-init` (подписанные Telegram'ом initData),
   Postgres проверяет HMAC-SHA256 (pgcrypto) и пускает к строкам только владельца.
-  Миграция: `supabase/migration-security.sql` (там же блок аварийного открата).
+  Миграция: `supabase/migration-security.sql
+3. supabase/migration-watchlist-chili.sql — колонка chili (перцы чили 🌶) в watchlist` (там же блок аварийного открата).
 - Веб-режим (вне Telegram): случайный ключ браузера `x-web-key`, колонка `web_key`;
   доступ только с того же браузера. Старые никовые строки недоступны by design.
 - **CSP** в index.html: сторонние скрипты запрещены (`script-src 'self' + telegram.org`),

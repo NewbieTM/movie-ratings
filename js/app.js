@@ -283,6 +283,9 @@ const App = (() => {
     if (seq !== navSeq) return;
     keyCache.set(key, m);
 
+    const curRow = wantRows.find((r) => r.movie_id === key);
+    const curChili = curRow && curRow.chili != null ? Number(curRow.chili) : 0;
+
     if (ex) {
       m.ratingKp = m.ratingKp ?? ex.ratingKp;
       m.ratingImdb = m.ratingImdb ?? ex.ratingImdb;
@@ -323,7 +326,14 @@ const App = (() => {
           <p class="overview">${esc(m.overview || "Описание отсутствует.")}</p>
           <button id="share-btn" class="btn ghost">⤴ Поделиться</button>
           ${!my ? `<button id="want-btn" class="btn ghost ${myWantSet.has(key) ? "active" : ""}">
-            ${myWantSet.has(key) ? "✓ В «Хочу посмотреть»" : "＋ Хочу посмотреть"}</button>` : ""}
+            ${myWantSet.has(key) ? "✓ В «Хочу посмотреть»" : "＋ Хочу посмотреть"}</button>
+          <div id="chili-picker">
+            <span class="cp-label">Насколько хочется посмотреть:</span>
+            <div class="cp-row">${[0,1,2,3,4].map((i) =>
+              `<button type="button" class="chili-opt${curChili >= i ? " on" : ""}" data-n="${i}"
+                aria-label="${i} перцев">🌶</button>`).join("")}
+            </div>
+          </div>` : ""}
           <div class="rate-box">
             <h3>${my ? `Ваша оценка: <span class="accent">${fmtR(my.rating)}</span> из 10` : "Поставьте оценку"}</h3>
             <div id="rate-stars"></div>
@@ -352,6 +362,35 @@ const App = (() => {
           haptic();
         } catch { /* пользователь отменил */ }
       };
+    }
+
+    const cp = $("#chili-picker");
+    if (cp) {
+      cp.addEventListener("click", async (e) => {
+        const b = e.target.closest(".chili-opt");
+        if (!b) return;
+        e.preventDefault();
+        const n = Number(b.dataset.n);
+        try {
+          if (!myWantSet.has(key)) {
+            await Store.wantAdd({
+              movieId: m.key, title: m.title, year: m.year,
+              poster: m.poster_path, tag: pickTag(m.tags), chili: n,
+            });
+            wantRows.unshift({ movie_id: m.key, movie_title: m.title, tag: pickTag(m.tags),
+                               chili: n, added_at: new Date().toISOString() });
+            syncWantSet();
+            if (wantBtn) { wantBtn.classList.add("active");
+              wantBtn.textContent = "✓ В «Хочу посмотреть»"; }
+          } else {
+            await Store.wantChili(key, n);
+            if (curRow) curRow.chili = n;
+          }
+          document.querySelectorAll("#chili-picker .chili-opt").forEach((el) =>
+            el.classList.toggle("on", Number(el.dataset.n) <= n));
+          haptic();
+        } catch (err) { toast("Не сохранилось: " + err.message, true); }
+      });
     }
 
     const wantBtn = $("#want-btn");
@@ -524,7 +563,7 @@ const App = (() => {
         poster: r.movie_poster,
         title: esc(r.movie_title),
         sub: `${esc(r.movie_year || "—")}`,
-        right: "",
+        right: `<span class="mi-chilis" title="Желание посмотреть">${chiliStr(r.chili)}</span>`,
         extra: `<button class="want-x" data-x="${esc(r.movie_id)}" title="Убрать из списка">✕</button>`,
       }));
     }
@@ -537,6 +576,7 @@ const App = (() => {
           <div class="card-body">
             <a class="card-title" href="#/movie/${encodeURIComponent(r.movie_id)}">${esc(r.movie_title)}</a>
             <div class="card-meta">${esc(r.movie_year || "—")}${r.tag ? ` <span class="chip">${esc(r.tag)}</span>` : ""}</div>
+            ${(Number(r.chili ?? 1) > 0) ? `<div class="card-chilis" title="Желание посмотреть">${chiliStr(r.chili)}</div>` : ""}
           </div>
           <button class="want-x" data-x="${esc(r.movie_id)}" title="Убрать из списка">✕</button>
         </div>`).join("")}</div>`;
@@ -566,12 +606,23 @@ const App = (() => {
     try { wantRows = await Store.wantAll(); } catch { wantRows = []; }
     syncWantSet();
     const usedTags = [...new Set(wantRows.map((r) => r.tag).filter(Boolean))];
+    let sortPref = "chili";
+    try { sortPref = localStorage.getItem("mr-want-sort") || "chili"; } catch {}
 
     function renderWant(syncUrl) {
       const t = ($("#want-tag") || {}).value || "";
       const qq = ($("#search-input").value || "").trim().toLowerCase();
+      const sortSel = $("#want-sort");
+      const sortMode = (sortSel && sortSel.value) || sortPref;
+      const SORTS = {
+        chili: (a, b) => ((b.chili ?? 1) - (a.chili ?? 1)) ||
+                 String(b.added_at || "").localeCompare(String(a.added_at || "")),
+        date:  (a, b) => String(b.added_at || "").localeCompare(String(a.added_at || "")),
+        title: (a, b) => String(a.movie_title).localeCompare(String(b.movie_title), "ru"),
+      };
       const rows = wantRows.filter((r) =>
-        (!t || r.tag === t) && (!qq || r.movie_title.toLowerCase().includes(qq)));
+        (!t || r.tag === t) && (!qq || r.movie_title.toLowerCase().includes(qq)))
+        .sort(SORTS[sortMode] || SORTS.chili);
       $("#want-count").textContent = String(rows.length);
       $("#wantgrid").innerHTML = wantGridHTML(rows);
       if (syncUrl) {
@@ -591,6 +642,11 @@ const App = (() => {
           <option value="">Все типы</option>
           ${usedTags.map((t) => `<option ${params.tag === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
         </select>
+        <select id="want-sort">
+          <option value="chili">По перцам 🌶</option>
+          <option value="date">По дате</option>
+          <option value="title">По названию</option>
+        </select>
         <button type="button" id="view-toggle" class="view-toggle">${getViewMode() === "cards" ? "☰ Компактно" : "▦ Карточки"}</button>
       </div>
       <div id="wantgrid"></div>`;
@@ -598,7 +654,13 @@ const App = (() => {
     if (params.q) $("#search-input").value = params.q;
     renderWant(false);
 
+    try { $("#want-sort").value = sortPref; } catch {}
     $("#want-tag").addEventListener("change", () => renderWant(true));
+    $("#want-sort").addEventListener("change", (e) => {
+      sortPref = e.target.value;
+      try { localStorage.setItem("mr-want-sort", sortPref); } catch {}
+      renderWant(true);
+    });
     bindViewToggle(() => renderWant(false));
 
     $("#wantgrid").addEventListener("click", async (e) => {
@@ -669,6 +731,11 @@ const App = (() => {
   }
   /** Компактный вид с группами по типу: линия-разделитель с названием категории,
       сортировка внутри группы сохраняется */
+  /** Строка перцев для отображения (по умолчанию 1) */
+  function chiliStr(n) {
+    const k = Math.max(0, Math.min(4, Number(n ?? 1) | 0));
+    return "\ud83c\udf36".repeat(k);
+  }
   const TAG_ORDER = ["Фильм", "Сериал", "Мультфильм", "Мультсериал", "Аниме", "ТВ-шоу"];
   const TAG_PLURAL = { "Фильм": "Фильмы", "Сериал": "Сериалы", "Мультфильм": "Мультфильмы",
                        "Мультсериал": "Мультсериалы", "Аниме": "Аниме", "ТВ-шоу": "ТВ-шоу" };

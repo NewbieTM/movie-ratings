@@ -258,6 +258,7 @@ const Store = (() => {
       movie_year: meta.year != null ? String(meta.year) : null,
       movie_poster: meta.poster || null,
       tag: meta.tag || null,
+      ...(meta.chili != null ? { chili: Math.max(0, Math.min(4, Number(meta.chili) | 0)) } : {}),
       user_id: me.userId || null,
       user_name: me.userId ? null : (me.displayName || "аноним"),
       web_key: me.userId && me.userId.startsWith("tg-") ? null : webKey(),
@@ -270,6 +271,22 @@ const Store = (() => {
     rows.unshift({ ...row, added_at: new Date().toISOString() });
     localStorage.setItem(LS_WANT, JSON.stringify(rows));
     return normRow(rows[0]);
+  }
+
+  /** Обновить «перцы чили» у фильма в watchlist */
+  async function wantChili(movieId, n) {
+    const lvl = Math.max(0, Math.min(4, Number(n) | 0));
+    const key = String(movieId);
+    if (mode() === "cloud") {
+      const r = await sb(`watchlist?movie_id=eq.${encodeURIComponent(key)}`, "PATCH", { chili: lvl });
+      return normRow(Array.isArray(r) ? r[0] : r);
+    }
+    const rows = JSON.parse(localStorage.getItem(LS_WANT) || "[]");
+    const row = rows.find((x) => x.movie_id === key);
+    if (!row) throw new Error("Нет в списке");
+    row.chili = lvl;
+    localStorage.setItem(LS_WANT, JSON.stringify(rows));
+    return normRow(row);
   }
 
   async function wantRemove(movieId) {
@@ -323,6 +340,6 @@ const Store = (() => {
     }
   }
 
-  return { mode, mine, save, remove, retag, wantAll, wantAdd, wantRemove,
+  return { mode, mine, save, remove, retag, wantAll, wantAdd, wantChili, wantRemove,
            identity, setProfile, claimLegacy, inTelegram };
 })();

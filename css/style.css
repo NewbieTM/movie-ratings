@@ -323,3 +323,16 @@ h2 .count { color: var(--text-dim); font-size: 0.9rem; font-weight: 400; }
 .mini-groupline::before, .mini-groupline::after {
   content: ""; flex: 1; height: 1px; background: #262c36;
 }
+
+/* Перцы чили: пикер на странице фильма + индикаторы в списках */
+#chili-picker { margin-bottom: 14px; }
+.cp-label { display: block; font-size: .8rem; color: var(--text-dim); margin-bottom: 6px; }
+.cp-row { display: flex; gap: 4px; }
+.chili-opt {
+  background: transparent; border: 1px solid #30363d; border-radius: 8px;
+  font-size: 1.15rem; padding: 4px 7px; cursor: pointer;
+  filter: grayscale(1) opacity(.35); transition: filter .12s, border-color .12s;
+}
+.chili-opt.on { filter: none; border-color: var(--accent-dim); background: rgba(255,255,255,.04); }
+.card-chilis { font-size: .85rem; letter-spacing: 2px; line-height: 1; margin-top: 4px; }
+.mi-chilis { font-size: .8rem; letter-spacing: 1px; white-space: nowrap; }
