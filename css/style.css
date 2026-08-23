@@ -310,3 +310,16 @@ h2 .count { color: var(--text-dim); font-size: 0.9rem; font-weight: 400; }
 }
 .view-toggle:hover { color: var(--accent); border-color: var(--accent-dim); }
 .mini-row .want-x { top: 4px; right: 4px; width: 22px; height: 22px; font-size: .7rem; }
+
+/* Разделители категорий в компактном виде */
+.mini-group { margin-bottom: 2px; }
+.mini-groupline {
+  display: flex; align-items: center; gap: 12px;
+  margin: 14px 0 8px;
+  color: var(--text-dim);
+  font-size: .72rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .08em;
+}
+.mini-groupline::before, .mini-groupline::after {
+  content: ""; flex: 1; height: 1px; background: #262c36;
+}

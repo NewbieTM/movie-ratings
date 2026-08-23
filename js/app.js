@@ -519,11 +519,11 @@ const App = (() => {
     if (!rows.length)
       return `<p class="empty">Под фильтры ничего не подошло.</p>`;
     if (getViewMode() === "compact") {
-      return minilistHTML(rows, (r) => miniRowHTML({
+      return groupedMiniHTML(rows, (r) => miniRowHTML({
         href: `#/movie/${encodeURIComponent(r.movie_id)}`,
         poster: r.movie_poster,
         title: esc(r.movie_title),
-        sub: `${esc(r.movie_year || "—")}${r.tag ? ` · ${esc(r.tag)}` : ""}`,
+        sub: `${esc(r.movie_year || "—")}`,
         right: "",
         extra: `<button class="want-x" data-x="${esc(r.movie_id)}" title="Убрать из списка">✕</button>`,
       }));
@@ -628,11 +628,11 @@ const App = (() => {
     if (!rows.length)
       return `<p class="empty">Под фильтры ничего не подошло.</p>`;
     if (getViewMode() === "compact") {
-      return minilistHTML(rows, (r) => miniRowHTML({
+      return groupedMiniHTML(rows, (r) => miniRowHTML({
         href: `#/movie/${encodeURIComponent(r.movie_id)}`,
         poster: r.movie_poster,
         title: esc(r.movie_title),
-        sub: `${esc(r.movie_year || "—")}${r.tag ? ` · ${esc(r.tag)}` : ""}`,
+        sub: `${esc(r.movie_year || "—")}`,
         right: `<b>${fmtR(r.rating)}</b>/10`,
       }));
     }
@@ -666,6 +666,27 @@ const App = (() => {
   }
   function minilistHTML(rows, mkRow) {
     return `<div class="minilist">${rows.map(mkRow).join("")}</div>`;
+  }
+  /** Компактный вид с группами по типу: линия-разделитель с названием категории,
+      сортировка внутри группы сохраняется */
+  const TAG_ORDER = ["Фильм", "Сериал", "Мультфильм", "Мультсериал", "Аниме", "ТВ-шоу"];
+  const TAG_PLURAL = { "Фильм": "Фильмы", "Сериал": "Сериалы", "Мультфильм": "Мультфильмы",
+                       "Мультсериал": "Мультсериалы", "Аниме": "Аниме", "ТВ-шоу": "ТВ-шоу" };
+  function groupedMiniHTML(rows, mkRow) {
+    const groups = new Map();
+    for (const r of rows) {
+      const k = r.tag || "Прочее";
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r);
+    }
+    const keys = [...groups.keys()].sort((a, b) =>
+      ((TAG_ORDER.indexOf(a) < 0 ? 99 : TAG_ORDER.indexOf(a)) -
+       (TAG_ORDER.indexOf(b) < 0 ? 99 : TAG_ORDER.indexOf(b))) || a.localeCompare(b, "ru"));
+    return keys.map((k) => `
+      <section class="mini-group">
+        <div class="mini-groupline"><span>${esc(TAG_PLURAL[k] || k)}</span></div>
+        ${minilistHTML(groups.get(k), mkRow)}
+      </section>`).join("");
   }
 
   // ================= Личность на веб-версии =================
