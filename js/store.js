@@ -258,7 +258,7 @@ const Store = (() => {
       movie_year: meta.year != null ? String(meta.year) : null,
       movie_poster: meta.poster || null,
       tag: meta.tag || null,
-      ...(meta.chili != null ? { chili: Math.max(0, Math.min(4, Number(meta.chili) | 0)) } : {}),
+      ...(meta.chili != null ? { chili: Math.max(1, Math.min(4, Number(meta.chili) | 0)) } : {}),
       user_id: me.userId || null,
       user_name: me.userId ? null : (me.displayName || "аноним"),
       web_key: me.userId && me.userId.startsWith("tg-") ? null : webKey(),
@@ -275,7 +275,7 @@ const Store = (() => {
 
   /** Обновить «перцы чили» у фильма в watchlist */
   async function wantChili(movieId, n) {
-    const lvl = Math.max(0, Math.min(4, Number(n) | 0));
+    const lvl = Math.max(1, Math.min(4, Number(n) | 0));
     const key = String(movieId);
     if (mode() === "cloud") {
       const r = await sb(`watchlist?movie_id=eq.${encodeURIComponent(key)}`, "PATCH", { chili: lvl });

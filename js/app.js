@@ -329,7 +329,7 @@ const App = (() => {
             ${myWantSet.has(key) ? "✓ В «Хочу посмотреть»" : "＋ Хочу посмотреть"}</button>
           <div id="chili-picker">
             <span class="cp-label">Насколько хочется посмотреть:</span>
-            <div class="cp-row">${[0,1,2,3,4].map((i) =>
+            <div class="cp-row">${[1,2,3,4].map((i) =>
               `<button type="button" class="chili-opt${curChili >= i ? " on" : ""}" data-n="${i}"
                 aria-label="${i} перцев">🌶</button>`).join("")}
             </div>
